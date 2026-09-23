@@ -73,6 +73,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   if (!e.target.closest('form[data-query]')) return;
   capture();
+  if (!['city','category','event_type','budget_kzt','duration_hours','language','event_date'].includes(e.target.name)) return;
   if (e.target.name === 'event_date') calendarFocus = '';
   if (document.getElementById('availability-calendar')) loadCalendar();
 });
