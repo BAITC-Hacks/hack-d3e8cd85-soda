@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" fill="none">
+  <title>EventMatch — от идеи события к подходящим людям</title>
+  <desc>Проект команды Soda для HackAlem AI. AI-консультант, проверенные условия и объяснимый выбор подрядчиков.</desc>
+  <rect width="1280" height="440" rx="24" fill="#F6F7ED"/>
+  <rect x="1" y="1" width="1278" height="438" rx="23" stroke="#DCE2D2"/>
+  <rect x="54" y="48" width="47" height="50" rx="15" fill="#39452D"/>
+  <text x="64" y="85" font-family="Arial,sans-serif" font-size="40" font-weight="700" fill="#D9EA8C">e.</text>
+  <text x="116" y="84" font-family="Arial,sans-serif" font-size="37" font-weight="700" letter-spacing="-2" fill="#293023">eventmatch.</text>
+  <text x="56" y="151" font-family="Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="3" fill="#596B3B">SODA  /  HACKALEM AI  /  FIREBIRD</text>
+  <text x="52" y="222" font-family="Arial,sans-serif" font-size="55" font-weight="700" letter-spacing="-2" fill="#293023">От идеи события</text>
+  <text x="54" y="287" font-family="Georgia,serif" font-size="55" font-style="italic" letter-spacing="-1" fill="#667740">к подходящим людям.</text>
+  <text x="56" y="342" font-family="Arial,sans-serif" font-size="18" fill="#626B5B">Расскажите о событии. Проверьте детали.</text>
+  <text x="56" y="369" font-family="Arial,sans-serif" font-size="18" fill="#626B5B">Сравните до трёх вариантов с конкретными причинами.</text>
+  <rect x="811" y="26" width="443" height="388" rx="28" fill="#435635"/>
+  <circle cx="1197" cy="87" r="99" stroke="#A2B577" stroke-opacity=".28"/>
+  <circle cx="1197" cy="87" r="127" stroke="#A2B577" stroke-opacity=".2"/>
+  <circle cx="870" cy="76" r="5" fill="#DBB86A"/>
+  <circle cx="897" cy="58" r="3" fill="#D9EA8C"/>
+  <g transform="translate(841 139) rotate(-8)">
+    <rect x="5" y="5" width="96" height="103" rx="34" fill="#9EB763"/>
+    <path d="M0 34C0 15 15 0 34 0H62C81 0 96 15 96 34V69C96 88 81 103 62 103H12C5 103 0 98 0 91V34Z" fill="#D9EA8C"/>
+    <path d="M55 0C57-19 74-29 88-28C87-11 73 0 55 0Z" fill="#D9EA8C"/>
+    <ellipse cx="32" cy="45" rx="5" ry="8" fill="#435635"/>
+    <ellipse cx="65" cy="45" rx="5" ry="8" fill="#435635"/>
+    <path d="M37 67Q49 77 60 67" stroke="#435635" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <rect x="967" y="153" width="248" height="55" rx="17" fill="#F6F7ED"/>
+  <text x="987" y="187" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#39452D">Понять вашу идею</text>
+  <rect x="940" y="225" width="275" height="55" rx="17" fill="#EAF0D8"/>
+  <text x="960" y="259" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#39452D">Проверить условия</text>
+  <rect x="912" y="297" width="303" height="55" rx="17" fill="#F6DFC5"/>
+  <text x="932" y="331" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#624C32">Объяснить каждый выбор</text>
+  <path d="M866 302V343M846 322H887M851 307L881 337M851 337L881 307" stroke="#D9EA8C" stroke-width="3"/>
+</svg>
