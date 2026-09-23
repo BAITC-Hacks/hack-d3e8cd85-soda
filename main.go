@@ -86,16 +86,17 @@ type Card struct {
 }
 
 type Result struct {
-	Status           string            `json:"status"`
-	Cards            []Card            `json:"cards"`
-	Total            int               `json:"total"`
-	CandidateCount   int               `json:"candidate_count"`
-	Excluded         map[string]int    `json:"excluded"`
-	Message          string            `json:"message"`
-	Ranking          string            `json:"ranking"`
-	Notice           string            `json:"notice"`
-	Version          string            `json:"data_version"`
-	DateAlternatives []DateAlternative `json:"date_alternatives"`
+	Status             string              `json:"status"`
+	Cards              []Card              `json:"cards"`
+	Total              int                 `json:"total"`
+	CandidateCount     int                 `json:"candidate_count"`
+	Excluded           map[string]int      `json:"excluded"`
+	Message            string              `json:"message"`
+	Ranking            string              `json:"ranking"`
+	Notice             string              `json:"notice"`
+	Version            string              `json:"data_version"`
+	DateAlternatives   []DateAlternative   `json:"date_alternatives"`
+	NearbyAlternatives []NearbyAlternative `json:"nearby_alternatives"`
 }
 
 type App struct {
@@ -298,7 +299,7 @@ var exclusionLabels = []struct{ key, label string }{
 }
 
 func (a *App) match(q Query) Result {
-	r := Result{Status: "matches_found", Cards: []Card{}, Excluded: map[string]int{}, Ranking: "price", Version: a.Version, DateAlternatives: []DateAlternative{}}
+	r := Result{Status: "matches_found", Cards: []Card{}, Excluded: map[string]int{}, Ranking: "price", Version: a.Version, DateAlternatives: []DateAlternative{}, NearbyAlternatives: []NearbyAlternative{}}
 	var busyCandidates []Card
 	ids := append([]string{}, q.Wishes...)
 	sort.Strings(ids)
@@ -381,6 +382,9 @@ func (a *App) match(q Query) Result {
 			}
 		}
 		r.Message += " Причины исключения: " + strings.Join(reasons, "; ") + ". Один профиль может не пройти несколько условий."
+	}
+	if r.Total == 0 {
+		r.NearbyAlternatives = a.nearbyAlternatives(q)
 	}
 	return r
 }

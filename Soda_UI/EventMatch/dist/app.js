@@ -117,6 +117,8 @@ document.addEventListener('click',e => {
   if (occasion) { capture(); state.event_type = occasion.dataset.occasion; activeResults = null; navigate('event'); return; }
   const alternative = e.target.closest('[data-alternative-date]');
   if (alternative) { state.event_date = alternative.dataset.alternativeDate; activeResults = null; calendarMonth = state.event_date.slice(0,7); navigate('review'); announce('Выбрана новая дата. Проверьте остальные условия и подтвердите подбор.'); return; }
+  const nearby = e.target.closest('[data-nearby-review]');
+  if (nearby) { navigate('review'); announce('Исходные условия сохранены. Измените только те параметры, которые готовы пересмотреть, и подтвердите поиск.'); return; }
   const go = e.target.closest('[data-go]');
   if (go && !go.disabled) { capture(); error = ''; navigate(go.dataset.go); }
 });
