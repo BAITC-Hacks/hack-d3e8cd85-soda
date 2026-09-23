@@ -55,7 +55,7 @@ function preferenceFields() {
   return `<div class="field"><label for="budget_kzt">Максимальный бюджет, ₸</label><input id="budget_kzt" name="budget_kzt" type="number" min="1" max="1000000000" step="1" required value="${state.budget_kzt ?? ''}" aria-describedby="budget-hint"><p class="hint" id="budget-hint">На одного подрядчика за мероприятие. Цена «от» не гарантирует итоговую стоимость.</p></div><div class="field-row"><div class="field"><label for="duration_hours">Часы работы подрядчика</label><input id="duration_hours" name="duration_hours" type="number" min="0.1" max="168" step="any" placeholder="Не важно" value="${state.duration_hours ?? ''}"></div>${selectField('Язык работы','language',options.languages,state.language,false)}</div>`;
 }
 function wishFields() {
-  return `<fieldset data-wishes class="wish-fieldset"><legend>Пожелания к стилю — необязательно</legend><p class="hint">Влияют на порядок, но не являются гарантией услуги. Выберите то, что действительно важно.</p>${!options.semantic_enabled ? '<p class="hint">Смысловой подбор пока недоступен: сейчас результаты будут упорядочены по начальной цене.</p>' : ''}<div class="wish-grid">${options.wishes.map(w => `<label class="wish-option"><input type="checkbox" name="wish" value="${w.id}" ${state.wishes.includes(w.id) ? 'checked' : ''}><span>${esc(w.label)}</span></label>`).join('')}</div></fieldset>`;
+  return `<fieldset data-wishes class="wish-fieldset"><legend>Пожелания к стилю — необязательно</legend><p class="hint">Влияют на порядок, но не являются гарантией услуги. Выберите то, что действительно важно.</p>${options.python_search_enabled ? '<p class="hint">При недоступности смыслового подбора пожелания сопоставляются по словам.</p>' : !options.semantic_enabled ? '<p class="hint">Смысловой подбор пока недоступен: сейчас результаты будут упорядочены по начальной цене.</p>' : ''}<div class="wish-grid">${options.wishes.map(w => `<label class="wish-option"><input type="checkbox" name="wish" value="${w.id}" ${state.wishes.includes(w.id) ? 'checked' : ''}><span>${esc(w.label)}</span></label>`).join('')}</div></fieldset>`;
 }
 function unresolvedFields() {
   if (!state.unverified_requirements.length) return '';
@@ -83,7 +83,8 @@ function card(p,i) {
 }
 function resultsPage() {
   const r = activeResults;
-  return `<div class="result-heading"><div>${header('Ваша подборка',`Подходящих вариантов: <em>${r.cards.length}</em>`,'Выбор из исходного каталога по подтверждённым условиям.')}</div>${button('Изменить условия','review',false,'sliders')}</div>${chips()}<div class="result-note">${icon('info')}<span>${esc(r.message)}</span></div>${r.notice ? `<p class="result-note">${esc(r.notice)}</p>` : ''}<p class="result-note">Порядок: ${r.ranking === 'semantic' ? 'смысловая близость пожеланиям, затем начальная цена и id' : 'начальная цена, затем id'}.</p>${r.date_change ? `<p class="review-note">${esc(r.date_change)}</p>` : ''}<div class="contractor-grid">${r.cards.map(card).join('')}</div><p class="result-bottom">Цены «от» не являются окончательным предложением. Сведения и заявления взяты из каталога; бронирование не выполняется.</p>`;
+  const rankingLabel = {semantic:'смысловая близость пожеланиям', hashing:'совпадения слов в пожеланиях и описании', budget:'близость цены к бюджету, затем совпадения условий', price:'начальная цена, затем id'}[r.ranking] || 'порядок подбора';
+  return `<div class="result-heading"><div>${header('Ваша подборка',`Подходящих вариантов: <em>${r.cards.length}</em>`,'Выбор из исходного каталога по подтверждённым условиям.')}</div>${button('Изменить условия','review',false,'sliders')}</div>${chips()}<div class="result-note">${icon('info')}<span>${esc(r.message)}</span></div>${r.notice ? `<p class="result-note">${esc(r.notice)}</p>` : ''}<p class="result-note">Порядок: ${esc(rankingLabel)}.</p>${r.date_change ? `<p class="review-note">${esc(r.date_change)}</p>` : ''}<div class="contractor-grid">${r.cards.map(card).join('')}</div><p class="result-bottom">Цены «от» не являются окончательным предложением. Сведения и заявления взяты из каталога; бронирование не выполняется.</p>`;
 }
 function emptyPage() {
   const absent = activeResults.status === 'category_unavailable';
@@ -108,7 +109,7 @@ async function runSearch() {
   const query = structuredClone(state);
   busy = true; error = ''; render();
   try {
-    const result = await api('/api/matches',query);
+    const result = await api('/api/search',query);
     result.date_change = dateChange(query,result);
     activeResults = result;
     previousSearch = {query,result};

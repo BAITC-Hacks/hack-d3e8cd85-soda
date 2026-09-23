@@ -46,8 +46,11 @@ def run_pipeline(dataset: list[dict], user_query: dict, raw_explanations: Any = 
         return analyze_no_matches_outcome(pool, compatibility_query, stats).as_dict()
 
     text_query = query.get("wishes", query.get("text", ""))
+    ranking = "budget"
     if len(filtered) > 3 and isinstance(text_query, str) and text_query.strip():
-        ranked = (semantic_ranker or SemanticRanker()).rank_candidates_by_semantic_similarity(filtered, text_query, 3)
+        ranker = semantic_ranker or SemanticRanker()
+        ranked = ranker.rank_candidates_by_semantic_similarity(filtered, text_query, 3)
+        ranking = "semantic" if ranker.model is not None else "hashing"
     else:
         ranked = rank_and_select_top_candidates(filtered, compatibility_query, 3)
     partial_message = None
@@ -66,7 +69,7 @@ def run_pipeline(dataset: list[dict], user_query: dict, raw_explanations: Any = 
     elif isinstance(raw_explanations, dict):
         explanations = raw_explanations
     response = build_final_response_cards(ranked, explanations, "MATCH_FOUND", partial_message)
-    response["details"] = {"query_hash": get_query_hash(compatibility_query), "filter_stats": stats}
+    response["details"] = {"query_hash": get_query_hash(compatibility_query), "filter_stats": stats, "ranking": ranking}
     return response
 
 

@@ -95,10 +95,10 @@ def _values(value: Any) -> set[str]:
     return {clean_text(item) for item in values if clean_text(item)}
 
 
-def filter_by_optional_criteria(dataset: list[dict], event_format: str | None = None, language: str | None = None, duration_hours: int | None = None) -> tuple[list[dict], dict[str, int]]:
+def filter_by_optional_criteria(dataset: list[dict], event_format: str | None = None, language: str | None = None, duration_hours: float | None = None) -> tuple[list[dict], dict[str, int]]:
     """Фильтрует по формату, языку и длительности."""
-    if duration_hours is not None and (isinstance(duration_hours, bool) or not isinstance(duration_hours, int) or duration_hours < 0):
-        raise ValueError("duration_hours должен быть неотрицательным int")
+    if duration_hours is not None and (isinstance(duration_hours, bool) or not isinstance(duration_hours, Real) or not math.isfinite(float(duration_hours)) or duration_hours < 0):
+        raise ValueError("duration_hours должен быть неотрицательным конечным числом")
     requested_format, requested_language = clean_text(event_format), clean_text(language)
     reasons = {"event_format": 0, "language": 0, "duration_hours": 0}
     result = []
@@ -115,7 +115,7 @@ def filter_by_optional_criteria(dataset: list[dict], event_format: str | None = 
     return result, reasons
 
 
-def run_hard_filters(dataset: list[dict], target_city: str, target_category: str, event_date: datetime.date, budget: float, event_format: str | None = None, language: str | None = None, duration_hours: int | None = None) -> tuple[list[dict], dict]:
+def run_hard_filters(dataset: list[dict], target_city: str, target_category: str, event_date: datetime.date, budget: float, event_format: str | None = None, language: str | None = None, duration_hours: float | None = None) -> tuple[list[dict], dict]:
     """Последовательно применяет все hard-фильтры."""
     city_matches = filter_by_city_and_category(dataset, target_city, target_category)
     available, busy = filter_by_availability(city_matches, event_date)

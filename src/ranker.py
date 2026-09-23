@@ -75,8 +75,8 @@ class SemanticRanker:
         try:
             module = importlib.import_module("sentence_transformers")
             return getattr(module, "SentenceTransformer")(model_name)
-        except ImportError:
-            logger.warning("sentence-transformers не установлен; используется hashing fallback")
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Не удалось загрузить модель %s: %s; используется hashing fallback", model_name, exc)
             return None
 
     def _fallback(self, text: str) -> tuple[float, ...]:
@@ -116,7 +116,10 @@ class SemanticRanker:
             if not isinstance(description, str) or len(description.strip()) < 3:
                 score = 0.0
             else:
-                vector = self.cache.setdefault(description.strip(), self.embed_text(description.strip()))
+                description = description.strip()
+                if description not in self.cache:
+                    self.cache[description] = self.embed_text(description)
+                vector = self.cache[description]
                 score = self.cosine_similarity(query_vector, vector)
             ranked.append((score, candidate, index))
         ranked.sort(key=lambda item: (-item[0], str(item[1].get("id", "")), clean_text(item[1].get("anon_name")), item[2]))
