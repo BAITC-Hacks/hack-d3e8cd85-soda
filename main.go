@@ -112,6 +112,7 @@ type App struct {
 	Index      *SemanticIndex
 	AI         AIClient
 	Search     SearchFunc
+	DB         *pgxpool.Pool
 }
 
 func loadCatalog(path, evidencePath string) (*App, error) {
@@ -535,7 +536,11 @@ func (a *App) handler() http.Handler {
 		sendJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/options", func(w http.ResponseWriter, r *http.Request) {
-		sendJSON(w, 200, map[string]any{"cities": a.Cities, "categories": a.Categories, "event_types": a.Formats, "languages": a.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(a.Profiles), "ai_enabled": a.AI.Key != "", "semantic_enabled": a.Index != nil, "python_search_enabled": a.Search != nil, "data_version": a.Version})
+		current := a.requestCatalog(w, r)
+		if current == nil {
+			return
+		}
+		sendJSON(w, 200, map[string]any{"cities": current.Cities, "categories": current.Categories, "event_types": current.Formats, "languages": current.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(current.Profiles), "ai_enabled": current.AI.Key != "", "voice_enabled": current.AI.Key != "", "semantic_enabled": current.Index != nil, "python_search_enabled": current.Search != nil, "data_version": current.Version})
 	})
 	searchHandler := func(w http.ResponseWriter, r *http.Request) {
 		var q Query
@@ -550,7 +555,7 @@ func (a *App) handler() http.Handler {
 			apiError(w, 422, "VALIDATION_ERROR", err.Error())
 			return
 		}
-		sendJSON(w, 200, a.match(q))
+		sendJSON(w, 200, current.match(q))
 	}
 	mux.HandleFunc("POST /api/matches", searchHandler)
 	mux.HandleFunc("POST /api/search", a.handleSearch)
@@ -613,7 +618,7 @@ func loadEnv() error {
 	if err != nil {
 		return err
 	}
-	for i, line := range strings.Split(string(raw), "\n") {
+	for i, line := range strings.Split(strings.TrimPrefix(string(raw), "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -621,7 +626,7 @@ func loadEnv() error {
 		key, value, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
-		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "LISTEN_ADDR", "PORT", "PYTHON_EXECUTABLE", "FRONTEND_ORIGIN"}, key) {
+		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT", "LISTEN_ADDR", "PORT", "PYTHON_EXECUTABLE", "FRONTEND_ORIGIN"}, key) {
 			return fmt.Errorf(".env: неизвестная настройка в строке %d", i+1)
 		}
 		if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
@@ -709,6 +714,8 @@ func main() {
 	if err := a.loadIndex("data/semantic-index.json"); err != nil {
 		log.Printf("Смысловой индекс недоступен: %v. Используется порядок по цене.", err)
 	}
+	// Configure the backend before building handlers or accepting requests.
+	a.Search = pythonSearch(pythonExecutable())
 	addr := serverAddress()
 	log.Printf("EventMatch: http://%s · %d профилей · AI=%t · смысловой индекс=%t", addr, len(a.Profiles), a.AI.Key != "", a.Index != nil)
 	server := &http.Server{Addr: addr, Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 60 * time.Second}
@@ -718,5 +725,4 @@ func main() {
 	if err := runServer(server, stop); err != nil {
 		log.Fatal(err)
 	}
-	a.Search = pythonSearch(pythonExecutable())
 }

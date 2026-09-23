@@ -1,15 +1,99 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
+
+// The subprocess executes the real entry point, including dependency wiring.
+func TestApplicationProcessHelper(t *testing.T) {
+	if os.Getenv("EVENTMATCH_TEST_SERVER") != "1" {
+		return
+	}
+	os.Args = os.Args[:1]
+	flag.CommandLine = flag.NewFlagSet("eventmatch", flag.ExitOnError)
+	main()
+}
+
+func TestApplicationStartupConnectsPython(t *testing.T) {
+	_, databaseURL := disposableDatabase(t)
+	t.Setenv("DATABASE_URL", databaseURL)
+	python := pythonExecutable()
+	if _, err := exec.LookPath(python); err != nil {
+		t.Skipf("Python unavailable: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EVENTMATCH_TEST_SERVER", "1")
+	t.Setenv("PORT", "")
+	t.Setenv("LISTEN_ADDR", address)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("PYTHON_EXECUTABLE", python)
+	t.Setenv("FRONTEND_ORIGIN", "")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, "-test.run=^TestApplicationProcessHelper$")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+	client := &http.Client{Timeout: 5 * time.Second}
+	baseURL := "http://" + address
+	for {
+		response, err := client.Get(baseURL + "/health")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("application did not become healthy")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	payload, err := json.Marshal(hostQuery())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Post(baseURL+"/api/search", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result Result
+	if err := json.Unmarshal(body, &result); err != nil || response.StatusCode != http.StatusOK || result.Status != "matches_found" || len(result.Cards) != 3 {
+		t.Fatalf("startup search: HTTP %d, body=%s, err=%v", response.StatusCode, body, err)
+	}
+}
 
 func TestRunServerReturnsListenError(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

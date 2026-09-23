@@ -385,8 +385,11 @@ func TestHealthSearchAndCORS(t *testing.T) {
 	t.Setenv("FRONTEND_ORIGIN", "")
 	a := catalog(t)
 	calls := 0
-	a.Search = func(ctx context.Context, query Query) (Result, error) {
+	a.Search = func(ctx context.Context, query Query, profiles []Profile) (Result, error) {
 		calls++
+		if !reflect.DeepEqual(profiles, a.Profiles) {
+			t.Error("catalog snapshot not passed to backend")
+		}
 		if _, ok := ctx.Deadline(); !ok {
 			t.Error("search context has no deadline")
 		}
@@ -452,9 +455,11 @@ func TestSearchValidationAndBackendFailures(t *testing.T) {
 		{"invalid fields", "{}", "application/json", nil, 422},
 		{"wrong media type", string(valid), "application/json-invalid", nil, 415},
 		{"unconfigured", string(valid), "application/json", nil, 503},
-		{"backend failure", string(valid), "application/json", func(context.Context, Query) (Result, error) { return Result{}, errors.New("private backend details") }, 503},
-		{"timeout", string(valid), "application/json", func(context.Context, Query) (Result, error) { return Result{}, context.DeadlineExceeded }, 504},
-		{"panic", string(valid), "application/json", func(context.Context, Query) (Result, error) { panic("private backend details") }, 500},
+		{"backend failure", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) {
+			return Result{}, errors.New("private backend details")
+		}, 503},
+		{"timeout", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) { return Result{}, context.DeadlineExceeded }, 504},
+		{"panic", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) { panic("private backend details") }, 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := catalog(t)
@@ -481,7 +486,7 @@ func TestSearchValidationAndBackendFailures(t *testing.T) {
 func TestConfiguredFrontendOrigin(t *testing.T) {
 	t.Setenv("FRONTEND_ORIGIN", "https://events.example")
 	a := catalog(t)
-	a.Search = func(ctx context.Context, query Query) (Result, error) { return a.match(query), nil }
+	a.Search = func(ctx context.Context, query Query, profiles []Profile) (Result, error) { return a.match(query), nil }
 	body, _ := json.Marshal(hostQuery())
 	request := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewReader(body))
 	request.Header.Set("Origin", "https://events.example")
@@ -530,6 +535,12 @@ func TestPythonSearchIntegration(t *testing.T) {
 			if tc.status == "matches_found" && len(result.Cards) == 0 {
 				t.Fatal("Python returned no cards")
 			}
+			if result.DateAlternatives == nil || result.NearbyAlternatives == nil {
+				t.Fatal("missing calendar suggestion arrays")
+			}
+			if tc.status != "matches_found" && len(result.NearbyAlternatives) == 0 {
+				t.Fatal("missing nearby alternatives for empty search")
+			}
 			for _, card := range result.Cards {
 				if card.Description == "" || len(card.Categories) == 0 || card.Explanation == "" || card.Origin != "organizer" {
 					t.Fatalf("incomplete UI card: %#v", card)
@@ -539,7 +550,7 @@ func TestPythonSearchIntegration(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := a.Search(ctx, hostQuery()); !errors.Is(err, context.Canceled) {
+	if _, err := a.Search(ctx, hostQuery(), a.Profiles); !errors.Is(err, context.Canceled) {
 		t.Fatalf("worker ignored cancellation: %v", err)
 	}
 }
@@ -558,6 +569,35 @@ func TestServerAddressEnvironment(t *testing.T) {
 				t.Fatalf("address: got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadEnvExample(t *testing.T) {
+	raw, err := os.ReadFile(".env.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"OPENAI_API_KEY", "PORT", "PYTHON_EXECUTABLE", "FRONTEND_ORIGIN", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT", "OPENAI_TRANSCRIPTION_MODEL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PORT", "9099")
+	t.Chdir(t.TempDir())
+	// Windows editors may save an otherwise valid dotenv file with a UTF-8 BOM.
+	content := "\ufeff" + strings.TrimPrefix(string(raw), "\ufeff") + "\nOPENAI_TRANSCRIPTION_MODEL=test-transcription\n"
+	if err := os.WriteFile(".env", []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("DATABASE_URL") != localDatabaseURL || os.Getenv("POSTGRES_PORT") != "5432" || os.Getenv("OPENAI_TRANSCRIPTION_MODEL") != "test-transcription" {
+		t.Fatal("database or voice configuration was not loaded")
+	}
+	if os.Getenv("PORT") != "9099" {
+		t.Fatal("dotenv overwrote an existing environment variable")
 	}
 }
 

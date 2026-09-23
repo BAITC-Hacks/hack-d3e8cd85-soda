@@ -94,7 +94,7 @@ func (a *App) snapshot(ctx context.Context) (*App, error) {
 	} // Pure in-memory inputs are used by unit tests only.
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	// ponytail: one statement reads the entire 66-profile catalog consistently.
+	// One statement reads the entire catalog consistently.
 	// For a large catalog, move the shared filtering rules into indexed SQL queries.
 	rows, err := a.DB.Query(ctx, `SELECT c.id,c.anon_name,c.categories,c.city,c.price_from_kzt,
 		c.event_formats,c.languages,c.max_hours,c.description,c.evidence,c.synthetic,
@@ -106,7 +106,7 @@ func (a *App) snapshot(ctx context.Context) (*App, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	snapshot := &App{AI: a.AI, DB: a.DB}
+	snapshot := &App{AI: a.AI, DB: a.DB, Search: a.Search}
 	for rows.Next() {
 		var p Profile
 		if err := rows.Scan(&p.ID, &p.Name, &p.Categories, &p.City, &p.Price, &p.Formats, &p.Languages,

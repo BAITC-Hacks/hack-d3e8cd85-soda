@@ -17,14 +17,22 @@ import (
 )
 
 // SearchFunc separates HTTP validation from the Python worker and allows test doubles.
-type SearchFunc func(context.Context, Query) (Result, error)
+type SearchFunc func(context.Context, Query, []Profile) (Result, error)
 
 func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	var query Query
 	if !decodeRequest(w, r, &query) {
 		return
 	}
-	if err := a.validate(query, false); err != nil {
+	// The database read and Python worker share the UI's request time budget.
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	current := a.requestCatalog(w, r)
+	if current == nil {
+		return
+	}
+	if err := current.validate(query, false); err != nil {
 		apiError(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
@@ -32,10 +40,7 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusServiceUnavailable, "SEARCH_UNAVAILABLE", "Обработчик поиска не настроен.")
 		return
 	}
-	// Finish before the server's WriteTimeout and the UI's request timeout.
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-	result, err := a.Search(ctx, query)
+	result, err := a.Search(ctx, query, current.Profiles)
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		apiError(w, http.StatusGatewayTimeout, "SEARCH_TIMEOUT", "Поиск превысил допустимое время. Попробуйте ещё раз.")
@@ -45,6 +50,10 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("search failed: %v", err)
 		apiError(w, http.StatusServiceUnavailable, "SEARCH_UNAVAILABLE", "Поиск временно недоступен.")
 	default:
+		// Calendar suggestions use the same database snapshot as the Python search.
+		alternatives := current.match(query)
+		result.DateAlternatives = alternatives.DateAlternatives
+		result.NearbyAlternatives = alternatives.NearbyAlternatives
 		sendJSON(w, http.StatusOK, result)
 	}
 }
@@ -71,7 +80,7 @@ func pythonExecutable() string {
 // pythonSearch exchanges one JSON document over stdin/stdout, without a shell.
 // Each request has an isolated worker which is killed when its context expires.
 func pythonSearch(executable string) SearchFunc {
-	return func(ctx context.Context, query Query) (Result, error) {
+	return func(ctx context.Context, query Query, profiles []Profile) (Result, error) {
 		ids := append([]string(nil), query.Wishes...)
 		slices.Sort(ids)
 		ids = slices.Compact(ids)
@@ -85,9 +94,12 @@ func pythonSearch(executable string) SearchFunc {
 			}
 		}
 		payload, err := json.Marshal(map[string]any{
-			"city": query.City, "category": query.Category, "event_date": query.Date,
-			"budget": query.Budget, "event_format": query.Format, "language": query.Language,
-			"duration_hours": query.Hours, "wishes": strings.Join(labels, "; "),
+			"dataset": profiles,
+			"query": map[string]any{
+				"city": query.City, "category": query.Category, "event_date": query.Date,
+				"budget": query.Budget, "event_format": query.Format, "language": query.Language,
+				"duration_hours": query.Hours, "wishes": strings.Join(labels, "; "),
+			},
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("encode pipeline query: %w", err)

@@ -23,7 +23,8 @@ def search(dataset: list[dict], query: dict) -> dict:
     profiles = {profile["id"]: profile for profile in dataset}
     cards = [
         {**profiles[card["id"]], "matched_category": query["category"],
-         "explanation": card["explanation"], "data_origin": "organizer"}
+         "explanation": card["explanation"],
+         "data_origin": profiles[card["id"]].get("data_origin", "organizer")}
         for card in result["cards"]
     ]
     total = stats.get("after_optional_criteria", 0)
@@ -57,7 +58,14 @@ def main() -> int:
             raise ValueError("Ожидался JSON-объект запроса")
         # Library diagnostics must not corrupt the single JSON response on stdout.
         with contextlib.redirect_stdout(sys.stderr):
-            response = search(load_dataset(args.dataset), query)
+            if "query" in query:
+                # The API sends a fresh database snapshot; JSONL is only for CLI use.
+                dataset, query = query.get("dataset"), query["query"]
+                if not isinstance(dataset, list) or not isinstance(query, dict):
+                    raise ValueError("Ожидались список профилей и объект запроса")
+            else:
+                dataset = load_dataset(args.dataset)
+            response = search(dataset, query)
         json.dump(response, sys.stdout, ensure_ascii=False, allow_nan=False)
         sys.stdout.write("\n")
         return 0

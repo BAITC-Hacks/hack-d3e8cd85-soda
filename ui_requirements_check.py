@@ -35,7 +35,7 @@ class Proxy(BaseHTTPRequestHandler):
                 event_date='2026-10-06', budget_kzt=1300000, duration_hours=6, language='русский',
                 wishes=[], unverified_requirements=requirements),focus='review',question='',choices=[])).encode()
         else:
-            if self.path == '/api/matches':
+            if self.path == '/api/search':
                 searches.append(json.loads(payload))
             req = urllib.request.Request('http://127.0.0.1:8080' + self.path, data=payload,
                 headers={'Content-Type': 'application/json'} if payload else {})

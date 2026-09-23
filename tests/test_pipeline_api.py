@@ -1,13 +1,26 @@
 """Контракт Python-ответа для веб-интерфейса и дробная длительность."""
 
+import io
+import json
 import unittest
 from unittest.mock import patch
 
-from pipeline_api import search
+from pipeline_api import main, search
 from tests.test_e2e_pipeline import BASE_QUERY, DATASET
 
 
 class PipelineAPITests(unittest.TestCase):
+    def test_api_uses_supplied_snapshot_and_preserves_origin(self):
+        dataset = [{**DATASET[0], "id": "live-database-profile", "data_origin": "team"}]
+        output = io.StringIO()
+        payload = json.dumps({"query": BASE_QUERY, "dataset": dataset})
+        with patch("sys.argv", ["pipeline_api.py", "--dataset", "missing.jsonl"]), \
+                patch("sys.stdin", io.StringIO(payload)), patch("sys.stdout", output):
+            self.assertEqual(main(), 0)
+        card = json.loads(output.getvalue())["cards"][0]
+        self.assertEqual(card["id"], "live-database-profile")
+        self.assertEqual(card["data_origin"], "team")
+
     def test_full_cards_and_fractional_hours(self):
         result = search(DATASET, {**BASE_QUERY, "duration_hours": 4.5})
         self.assertEqual(result["status"], "matches_found")
