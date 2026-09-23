@@ -16,23 +16,27 @@ import (
 )
 
 type AIClient struct {
-	Key, Model, EmbeddingModel, BaseURL string
-	HTTP                                *http.Client
+	Key, Model, EmbeddingModel, TranscriptionModel, BaseURL string
+	HTTP                                                    *http.Client
 }
 
 func (c AIClient) post(ctx context.Context, path string, payload, output any) error {
-	if c.Key == "" {
-		return errors.New("OPENAI_API_KEY не задан")
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(body))
+	return c.request(ctx, path, bytes.NewReader(body), "application/json", output)
+}
+
+func (c AIClient) request(ctx context.Context, path string, body io.Reader, contentType string, output any) error {
+	if c.Key == "" {
+		return errors.New("OPENAI_API_KEY не задан")
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+c.Key)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

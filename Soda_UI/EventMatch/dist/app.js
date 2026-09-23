@@ -40,7 +40,7 @@ function sidebar(route) {
 }
 function briefPage() {
   return header('AI-консультант','Расскажите о событии.<br>Найдём <em>ваших людей.</em>','Опишите мероприятие своими словами. Мы предложим условия для вашего подтверждения.') +
-    `<form id="brief-form" class="content-form"><div class="form-card"><label for="brief">Какое мероприятие вы планируете?</label><textarea id="brief" name="text" rows="5" maxlength="2000" required placeholder="Ведущий на корпоратив в Алматы 6 октября 2026, до 1 300 000 тенге, на русском, на 6 часов. Хочется спокойной атмосферы.">${esc(rawBrief)}</textarea><p class="hint">Город, дата, формат, категория и бюджет обязательны. Язык, часы работы и пожелания — по желанию.</p><p class="hint">Текст отправляется в OpenAI для разбора. Не указывайте контакты и личные данные гостей.</p>${!options.ai_enabled ? '<p class="error">AI-консультант пока недоступен. Условия можно заполнить вручную.</p>' : ''}</div><div class="actions">${button('Заполнить вручную','event',false,'sliders')}<button class="btn btn-primary" type="submit" ${!options.ai_enabled ? 'disabled' : ''}>Понять запрос ${icon('sparkles')}</button></div></form><div class="helper-note">${icon('shield')}<span>Никого не бронируем. Сначала вы проверите параметры, затем получите до трёх рекомендаций.</span></div><section class="demo-examples" aria-label="Примеры по исходному каталогу"><p class="hint">Можно начать с проверенного примера:</p><div class="actions"><button class="btn" data-example="hosts">Ведущие в Алматы</button><button class="btn" data-example="rare">Флорист в Астане</button><button class="btn" data-example="empty">Занято на дату</button></div></section>`;
+    `<form id="brief-form" class="content-form"><div class="form-card"><label for="brief">Какое мероприятие вы планируете?</label><textarea id="brief" name="text" rows="5" maxlength="2000" required placeholder="Ведущий на корпоратив в Алматы 6 октября 2026, до 1 300 000 тенге, на русском, на 6 часов. Хочется спокойной атмосферы.">${esc(rawBrief)}</textarea>${voiceControls()}<p class="hint">Город, дата, формат, категория и бюджет обязательны. Язык, часы работы и пожелания — по желанию.</p><p class="hint">Текст отправляется в OpenAI для разбора. Не указывайте контакты и личные данные гостей.</p>${!options.ai_enabled ? '<p class="error">AI-консультант пока недоступен. Условия можно заполнить вручную.</p>' : ''}</div><div class="actions">${button('Заполнить вручную','event',false,'sliders')}<button class="btn btn-primary" type="submit" ${!options.ai_enabled ? 'disabled' : ''}>Понять запрос ${icon('sparkles')}</button></div></form><div class="helper-note">${icon('shield')}<span>Никого не бронируем. Сначала вы проверите параметры, затем получите до трёх рекомендаций.</span></div><section class="demo-examples" aria-label="Примеры по исходному каталогу"><p class="hint">Можно начать с проверенного примера:</p><div class="actions"><button class="btn" data-example="hosts">Ведущие в Алматы</button><button class="btn" data-example="rare">Флорист в Астане</button><button class="btn" data-example="empty">Занято на дату</button></div></section>`;
 }
 function eventFields() {
   return selectField('Город','city',options.cities,state.city) + selectField('Формат мероприятия','event_type',options.event_types,state.event_type) + `<div class="field"><label for="event_date">Дата мероприятия</label><input id="event_date" name="event_date" type="date" required value="${esc(state.event_date)}" min="${options.first_date}" max="${options.last_date}" aria-describedby="date-hint"><p class="hint" id="date-hint">Календарь доступен с 23.09.2026 по 31.12.2026.</p></div>`;
@@ -75,7 +75,7 @@ function chips() {
   return `<div class="chips">${values.map(v => `<span class="chip">${esc(v)}</span>`).join('')}</div>`;
 }
 function provenance(p) {
-  return `<span class="synthetic">${p.synthetic ? 'Синтетический профиль организаторов' : 'Исходный каталог · анонимизировано'}</span>${p.price_imputed ? '<p class="hint">Цена дополнена при подготовке данных.</p>' : ''}${p.city_imputed ? '<p class="hint">Город дополнен при подготовке данных.</p>' : ''}`;
+  return `<span class="synthetic">${p.data_origin === 'team' ? (p.synthetic ? 'Синтетический профиль команды' : 'Добавлено командой') : p.synthetic ? 'Синтетический профиль организаторов' : 'Исходный каталог · анонимизировано'}</span>${p.price_imputed ? '<p class="hint">Цена дополнена при подготовке данных.</p>' : ''}${p.city_imputed ? '<p class="hint">Город дополнен при подготовке данных.</p>' : ''}`;
 }
 const initials = p => p.anon_name.split(' ').slice(0,2).map(x => x[0]).join('');
 function card(p,i) {
@@ -120,6 +120,7 @@ async function runSearch() {
 function requestError(e) { return ['TimeoutError','AbortError'].includes(e.name) ? 'Сервис не ответил вовремя. Условия сохранены, попробуйте ещё раз.' : e.message; }
 function render() {
   if (!options) return;
+  cancelDictation();
   let route = location.hash.slice(1) || 'brief';
   if (['results','no-category','no-matches'].includes(route) || route.startsWith('profile/')) {
     if (!activeResults) { navigate('review'); return; }
@@ -163,7 +164,7 @@ document.addEventListener('keydown',e => {
   buttons[next].click();
 });
 document.addEventListener('submit',async e => {
-  e.preventDefault(); if (busy || !e.target.reportValidity()) return;
+  e.preventDefault(); if (busy || dictation || !e.target.reportValidity()) return;
   error = '';
   if (e.target.id === 'brief-form') {
     rawBrief = new FormData(e.target).get('text'); busy = true; render();

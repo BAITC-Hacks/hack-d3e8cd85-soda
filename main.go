@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
@@ -19,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const firstDate, lastDate = "2026-09-23", "2026-12-31"
@@ -103,6 +106,7 @@ type App struct {
 	Version    string
 	Index      *SemanticIndex
 	AI         AIClient
+	DB         *pgxpool.Pool
 }
 
 func loadCatalog(path, evidencePath string) (*App, error) {
@@ -176,6 +180,42 @@ func loadCatalog(path, evidencePath string) (*App, error) {
 			return nil, fmt.Errorf("%s: цитата отсутствует в описании", p.ID)
 		}
 		a.Profiles = append(a.Profiles, p)
+	}
+	return a, a.finalizeCatalog()
+}
+
+func (a *App) finalizeCatalog() error {
+	a.Cities, a.Categories, a.Formats, a.Languages = nil, nil, nil, nil
+	for i := range a.Profiles {
+		p := &a.Profiles[i]
+		if p.ID == "" || p.Name == "" || p.City == "" || p.Price < 0 || p.Evidence == "" || !strings.Contains(p.Description, p.Evidence) {
+			return fmt.Errorf("%s: некорректные сведения профиля", p.ID)
+		}
+		if p.Hours != nil && (math.IsNaN(*p.Hours) || math.IsInf(*p.Hours, 0) || *p.Hours <= 0) {
+			return fmt.Errorf("%s: некорректные часы", p.ID)
+		}
+		for _, values := range []*[]string{&p.Categories, &p.Formats, &p.Languages} {
+			if len(*values) == 0 {
+				return fmt.Errorf("%s: пустой список условий", p.ID)
+			}
+			for _, value := range *values {
+				if strings.TrimSpace(value) == "" {
+					return fmt.Errorf("%s: пустое значение в условиях", p.ID)
+				}
+			}
+			sort.Strings(*values)
+			*values = slices.Compact(*values)
+		}
+		if p.Busy == nil {
+			p.Busy = []string{}
+		}
+		for _, date := range p.Busy {
+			if !validDate(date) {
+				return fmt.Errorf("%s: дата вне календаря", p.ID)
+			}
+		}
+		sort.Strings(p.Busy)
+		p.Busy = slices.Compact(p.Busy)
 		a.Cities = append(a.Cities, p.City)
 		a.Categories = append(a.Categories, p.Categories...)
 		a.Formats = append(a.Formats, p.Formats...)
@@ -186,13 +226,12 @@ func loadCatalog(path, evidencePath string) (*App, error) {
 		*values = slices.Compact(*values)
 	}
 	sort.Slice(a.Profiles, func(i, j int) bool { return a.Profiles[i].ID < a.Profiles[j].ID })
-	definition, _ := json.Marshal(wishes)
-	h := sha256.New()
-	h.Write(raw)
-	h.Write(evidenceRaw)
-	h.Write(definition)
-	a.Version = fmt.Sprintf("%x", h.Sum(nil))
-	return a, nil
+	definition, _ := json.Marshal(struct {
+		Profiles []Profile
+		Wishes   []Wish
+	}{a.Profiles, wishes})
+	a.Version = fmt.Sprintf("%x", sha256.Sum256(definition))
+	return nil
 }
 
 func validDate(s string) bool {
@@ -388,18 +427,26 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, target any) bool {
 func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/options", func(w http.ResponseWriter, r *http.Request) {
-		sendJSON(w, 200, map[string]any{"cities": a.Cities, "categories": a.Categories, "event_types": a.Formats, "languages": a.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(a.Profiles), "ai_enabled": a.AI.Key != "", "semantic_enabled": a.Index != nil, "data_version": a.Version})
+		current := a.requestCatalog(w, r)
+		if current == nil {
+			return
+		}
+		sendJSON(w, 200, map[string]any{"cities": current.Cities, "categories": current.Categories, "event_types": current.Formats, "languages": current.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(current.Profiles), "ai_enabled": a.AI.Key != "", "voice_enabled": a.AI.Key != "", "semantic_enabled": current.Index != nil, "data_version": current.Version})
 	})
 	mux.HandleFunc("POST /api/matches", func(w http.ResponseWriter, r *http.Request) {
 		var q Query
 		if !decodeRequest(w, r, &q) {
 			return
 		}
-		if err := a.validate(q, false); err != nil {
+		current := a.requestCatalog(w, r)
+		if current == nil {
+			return
+		}
+		if err := current.validate(q, false); err != nil {
 			apiError(w, 422, "VALIDATION_ERROR", err.Error())
 			return
 		}
-		sendJSON(w, 200, a.match(q))
+		sendJSON(w, 200, current.match(q))
 	})
 	mux.HandleFunc("POST /api/briefs", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
@@ -412,16 +459,21 @@ func (a *App) handler() http.Handler {
 			apiError(w, 422, "VALIDATION_ERROR", "Опишите мероприятие: от 1 до 6000 байт текста.")
 			return
 		}
-		q, err := a.parseBrief(r.Context(), input.Text)
+		current := a.requestCatalog(w, r)
+		if current == nil {
+			return
+		}
+		q, err := current.parseBrief(r.Context(), input.Text)
 		if err != nil {
 			apiError(w, 503, "AI_UNAVAILABLE", "AI сейчас недоступен или не смог надёжно разобрать запрос. Заполните поля вручную; строгий подбор работает.")
 			return
 		}
 		sendJSON(w, 200, q)
 	})
+	mux.HandleFunc("POST /api/transcriptions", a.transcriptionHandler)
 	files := http.FileServer(http.Dir("Soda_UI/EventMatch/dist"))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" && r.URL.Path != "/styles.css" && r.URL.Path != "/app.js" {
+		if !slices.Contains([]string{"/", "/index.html", "/styles.css", "/app.js", "/voice.js"}, r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -458,7 +510,7 @@ func loadEnv() error {
 		key, value, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
-		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "LISTEN_ADDR"}, key) {
+		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "LISTEN_ADDR", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT"}, key) {
 			return fmt.Errorf(".env: неизвестная настройка в строке %d", i+1)
 		}
 		if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
@@ -486,11 +538,22 @@ func main() {
 	if err := loadEnv(); err != nil {
 		log.Fatal(err)
 	}
-	a, err := loadCatalog("data/catalog.csv", "data/evidence.json")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := openDatabase(ctx, envOr("DATABASE_URL", localDatabaseURL))
 	if err != nil {
 		log.Fatal(err)
 	}
-	a.AI = AIClient{Key: os.Getenv("OPENAI_API_KEY"), Model: envOr("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14"), EmbeddingModel: envOr("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), BaseURL: "https://api.openai.com/v1", HTTP: &http.Client{Timeout: 8 * time.Second}}
+	defer pool.Close()
+	if err := initDatabase(ctx, pool, "data/catalog.csv", "data/evidence.json"); err != nil {
+		log.Fatal(err)
+	}
+	a := &App{DB: pool}
+	a.AI = AIClient{Key: os.Getenv("OPENAI_API_KEY"), Model: envOr("OPENAI_MODEL", "gpt-4.1-mini-2025-04-14"), EmbeddingModel: envOr("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"), TranscriptionModel: envOr("OPENAI_TRANSCRIPTION_MODEL", "gpt-transcribe"), BaseURL: "https://api.openai.com/v1", HTTP: &http.Client{Timeout: 8 * time.Second}}
+	a, err = a.snapshot(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if *prepare {
 		if err := a.prepareIndex("data/semantic-index.json"); err != nil {
 			log.Fatal(err)
