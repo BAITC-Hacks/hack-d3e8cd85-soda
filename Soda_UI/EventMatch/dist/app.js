@@ -1,72 +1,184 @@
 'use strict';
-
-// All records below are fictional and added for this UI demonstration.
-// Replace CATALOG with the hackathon JSONL records when connecting real data.
-const CATEGORIES = [
-  ['Host','The voice of your event','mic'],['Photographer','Moments worth keeping','camera'],
-  ['Banquet hall','A place to come together','building'],['Florist','Details that bloom','flower'],
-  ['Decorator','Set the scene','sparkles'],['Ceremony host','Make it meaningful','heart'],
-  ['Gifts and souvenirs','Something to remember','gift'],['Photo and video booths','A little extra fun','image'],
-  ['Hotel','Stay close to the occasion','bed'],['Instrumentalist','Find your soundtrack','music']
-];
-const EVENT_TYPES=['Corporate event','Wedding','Toi','Conference','Anniversary','Birthday'];
-const CITIES=['Almaty','Astana','Abroad'];
-const LANGUAGES=['Any language','Kazakh','Russian','English'];
-const makeProfile=(id,name,category,city,price,formats,languages,hours,busy,description)=>({id,anon_name:name,categories:[category],city,price_from_kzt:price,event_formats:formats,languages,max_hours:hours,busy_dates:busy,description,synthetic:true,city_imputed:false,price_imputed:false,data_origin:'team_demo'});
-const CATALOG=[
- makeProfile('demo-001','Arman S.','Host','Almaty',180000,['Corporate event','Anniversary','Wedding'],['Kazakh','Russian'],5,['2026-10-18','2026-12-19'],'Leads corporate programs with team introductions and award presentations.'),
- makeProfile('demo-002','Dana M.','Host','Almaty',200000,['Corporate event','Wedding','Toi'],['Kazakh','Russian','English'],6,['2026-12-19'],'Runs bilingual interactive programs with audience games and team activities.'),
- makeProfile('demo-003','Nurlan A.','Host','Almaty',160000,['Corporate event','Birthday','Anniversary'],['Kazakh','Russian'],5,['2026-10-17','2026-12-19'],'Specializes in relaxed celebrations with quizzes and audience participation.'),
- makeProfile('demo-004','Aigerim K.','Host','Astana',170000,['Corporate event','Conference','Wedding'],['Kazakh','English'],6,['2026-12-19'],'Presents formal ceremonies and moderates conference sessions in Kazakh and English.'),
- makeProfile('demo-005','Frame Studio','Photographer','Almaty',140000,EVENT_TYPES,['Kazakh','Russian'],8,['2026-10-17'],'Documents candid moments and small details with a natural reportage approach.'),
- makeProfile('demo-006','Light & Line','Photographer','Almaty',190000,EVENT_TYPES,['Kazakh','Russian','English'],6,['2026-12-19'],'Combines event reportage with carefully composed group portraits.'),
- makeProfile('demo-007','Aspan Hall','Banquet hall','Almaty',450000,['Corporate event','Wedding','Toi','Anniversary'],['Kazakh','Russian'],8,['2026-10-17','2026-12-19'],'An indoor hall with a dedicated stage and an open dining area.'),
- makeProfile('demo-008','Stem Atelier','Florist','Almaty',90000,['Corporate event','Wedding','Anniversary'],['Kazakh','Russian'],null,['2026-12-19'],'Creates seasonal floral arrangements for tables and ceremony backdrops.'),
- makeProfile('demo-009','Forma Decor','Decorator','Astana',150000,['Corporate event','Wedding','Birthday'],['Kazakh','Russian'],null,['2026-12-19'],'Designs understated table settings and coordinated event backdrops.'),
- makeProfile('demo-010','Keepsake Studio','Gifts and souvenirs','Almaty',65000,EVENT_TYPES,['Kazakh','Russian'],null,[],'Produces personalized guest gifts and custom event keepsakes.'),
- makeProfile('demo-011','Saz Ensemble','Instrumentalist','Almaty',120000,['Corporate event','Wedding','Anniversary'],['Kazakh','Russian'],5,['2026-12-19'],'Performs acoustic music with dombra and violin for receptions and dinners.'),
- makeProfile('demo-012','Ceremony by Aya','Ceremony host','Almaty',110000,['Wedding'],['Kazakh','English'],3,['2026-12-19'],'Creates intimate bilingual wedding ceremonies with a personalized script.')
-];
-
 const PATHS={arrow:'M5 12h14m-5-5 5 5-5 5',back:'M19 12H5m5-5-5 5 5 5',check:'m5 12 4 4L19 6',pin:'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0',calendar:'M5 5h14v15H5zM8 3v4m8-4v4M5 10h14',sparkles:'m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3',mic:'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0V5ZM6 11v1a6 6 0 0 0 12 0v-1M12 18v4m-4 0h8',camera:'M3 7h4l2-3h6l2 3h4v13H3zM16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',building:'M4 21V9l8-6 8 6v12M2 21h20M9 21v-7h6v7M8 10h0m8 0h0',flower:'M12 20v-8m0 7c-4 0-6-2-6-4 4 0 6 2 6 4m0-1c4 0 6-2 6-4-4 0-6 2-6 4M12 4c-5-5-9 2-4 4-5 5 3 8 4 3 3 5 9 0 4-3 5-3 0-8-4-4',heart:'M20 5c-3-3-6-1-8 1-2-2-5-4-8-1-6 6 8 15 8 15s14-9 8-15Z',gift:'M3 8h18v4H3zM5 12v9h14v-9M12 8v13M12 8C2 8 6-2 12 8c6-10 10 0 0 0',image:'M3 3h18v18H3zM3 17l6-6 5 5 3-3 4 4M16 7h0',bed:'M3 4v17m18-10v10M3 16h18M3 8h6v8M9 10h10a2 2 0 0 1 2 2v4',music:'M9 18V5l11-2v13M9 5v4l11-2M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0M20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0',info:'M12 16v-5m0-4h0M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',search:'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0m-2 4 7 7',clock:'M12 7v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',shield:'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Zm-4 9 3 3 5-6',sliders:'M4 7h16M4 17h16M8 4v6m8 4v6',globe:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M2 12h20M12 2c-6 6-6 14 0 20 6-6 6-14 0-20'};
 const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${PATHS[name]||PATHS.sparkles}"/></svg>`;
-const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const money=n=>'₸'+new Intl.NumberFormat('en-US').format(n);
-const dateLabel=d=>new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(new Date(d+'T12:00:00Z'));
-const button=(text,go,primary=false,ico='arrow')=>`<button type="button" class="btn ${primary?'btn-primary':''}" data-go="${go}">${ico==='back'?icon(ico):''}${text}${ico&&ico!=='back'?icon(ico):''}</button>`;
-const opts=(values,selected)=>values.map(v=>`<option${v===selected?' selected':''}>${esc(v)}</option>`).join('');
-const state={city:'Almaty',event_date:'2026-10-17',event_type:'Corporate event',category:'Host',budget_kzt:200000,duration_hours:5,language:'Kazakh'};
-const STEPS=[['event','Event details','Place, date & occasion'],['category','Contractor category','Who you’re looking for'],['preferences','Your preferences','Budget & the finer details'],['review','Review & match','Let’s find your people']];
-let furthest=0,activeResults=null,searching=false;
-const main=document.getElementById('main');
-function header(kicker,title,subtitle){return `<div class="eyebrow">${kicker}</div><h1>${title}</h1>${subtitle?`<p class="intro">${subtitle}</p>`:''}`;}
-function announce(message){document.getElementById('announcer').textContent=message;}
-function navigate(route){if(location.hash.slice(1)===route)render();else location.hash=route;}
-function capture(){const form=main.querySelector('form');if(!form)return;const before=JSON.stringify(state);const data=new FormData(form);for(const [k,v]of data.entries())state[k]=['budget_kzt','duration_hours'].includes(k)?(v===''?null:Number(v)):v;if(before!==JSON.stringify(state))activeResults=null;}
-function sidebar(route){const active=Math.max(0,STEPS.findIndex(x=>x[0]===route));const result=['results','no-category','no-matches'].includes(route)||route.startsWith('profile');document.getElementById('step-nav').innerHTML=STEPS.map(([key,name,sub],i)=>`<button type="button" data-go="${key}" class="step-button ${result||i<active?'completed':i===active?'active':''}" ${!result&&i>furthest?'disabled':''} ${!result&&i===active?'aria-current="step"':''}><span class="number">${result||i<active?'✓':String(i+1).padStart(2,'0')}</span><span><strong>${name}</strong><small>${sub}</small></span></button>`).join('');document.getElementById('brief-data').innerHTML=[['City',state.city],['Date',state.event_date?dateLabel(state.event_date):'Not selected'],['Occasion',state.event_type],...(furthest>0?[['Category',state.category]]:[]),...(furthest>1?[['Budget',money(state.budget_kzt||0)]]:[])].map(([k,v])=>`<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');}
-function eventPage(){return header('01 / Event details','Every great event starts<br>with <em>a little detail.</em>','Tell us where, when, and what you’re celebrating.')+`<form id="event-form" class="content-form"><div class="form-card"><div class="section-label"><span>Your event</span><span>Step 1 of 4</span></div><div class="field"><label for="city">Where is it happening?</label><div class="input-wrap">${icon('pin')}<select id="city" name="city">${opts(CITIES,state.city)}</select></div></div><div class="field"><label for="event_type">What’s the occasion?</label><div class="input-wrap">${icon('sparkles')}<select id="event_type" name="event_type">${opts(EVENT_TYPES,state.event_type)}</select></div></div><div class="field"><label for="event_date">When’s the big day?</label><input id="event_date" name="event_date" type="date" required value="${esc(state.event_date)}" min="2026-09-23" max="2026-12-31" aria-describedby="date-hint"><div class="hint" id="date-hint">Availability is provided for September 23 – December 31, 2026.</div></div></div><div class="actions"><span class="bottom-note">${icon('shield')}No account needed</span><button class="btn btn-primary" type="submit">Choose a category ${icon('arrow')}</button></div></form><div class="helper-note">${icon('info')}<span>We’ll check availability on your date before recommending anyone.</span></div>`;}
-function categoryPage(){return header('02 / Contractor category','Who will bring your<br>event <em>to life?</em>','Choose one category. We’ll take care of finding the fit.')+`<div class="category-grid" role="radiogroup" aria-label="Contractor category">${CATEGORIES.map(([name,sub,ico])=>`<button role="radio" aria-checked="${state.category===name}" tabindex="${state.category===name?'0':'-1'}" type="button" class="category-option" data-category="${esc(name)}"><span class="category-icon">${icon(ico)}</span><span><strong>${name}</strong><small>${sub}</small></span><span class="radio-mark" aria-hidden="true"></span></button>`).join('')}</div><div class="actions" style="max-width:750px">${button('Back','event',false,'back')}${button('Set preferences','preferences',true)}</div>`;}
-function preferencesPage(){return header('03 / Your preferences','The right fit.<br><em>Within your budget.</em>','A few preferences help us make more thoughtful recommendations.')+`<form id="preferences-form" class="content-form"><div class="form-card"><div class="field"><label for="budget_kzt">Maximum budget</label><div class="input-wrap budget-wrap"><input id="budget_kzt" name="budget_kzt" type="number" min="1" max="1000000000" step="1" required value="${state.budget_kzt??''}" aria-describedby="budget-hint"><span aria-hidden="true">₸</span></div><div class="hint" id="budget-hint">KZT per event. Contractor prices are starting rates.</div></div><hr class="divider"><div class="optional-label">A few extra details · Optional</div><div class="field-row"><div class="field"><label for="duration_hours">Duration <small>hours</small></label><div class="input-wrap">${icon('clock')}<input id="duration_hours" name="duration_hours" type="number" min="0.5" max="168" step="0.5" placeholder="Any duration" value="${state.duration_hours??''}"></div></div><div class="field"><label for="language">Working language</label><div class="input-wrap">${icon('globe')}<select id="language" name="language">${opts(LANGUAGES,state.language)}</select></div></div></div></div><div class="actions">${button('Back','category',false,'back')}<button class="btn btn-primary" type="submit">Review your event ${icon('arrow')}</button></div></form>`;}
-const summaryRows=rows=>`<dl>${rows.map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
-function reviewPage(){return header('04 / Review & match','Looks like a plan.<br>Let’s find <em>your people.</em>','One last look before we match your event with the right contractors.')+`<div class="summary-grid"><section class="summary-card"><div class="summary-title"><h2>Your event</h2><button class="text-button" data-go="event">Edit</button></div>${summaryRows([['City',state.city],['Date',dateLabel(state.event_date)],['Occasion',state.event_type]])}</section><section class="summary-card"><div class="summary-title"><h2>Your preferences</h2><button class="text-button" data-go="preferences">Edit</button></div>${summaryRows([['Category',state.category],['Budget',money(state.budget_kzt)],['Duration',state.duration_hours?state.duration_hours+' hours':'Any duration'],['Language',state.language]])}<button class="text-button" data-go="category">Change category</button></section></div><div class="review-note">${icon('sparkles')}<p><strong>A shortlist, with reasons.</strong>Up to 3 available contractors, each with an explanation of how they fit your event.</p></div><div class="actions">${button('Back','preferences',false,'back')}<button class="btn btn-primary" id="find-matches">Find my matches ${icon('arrow')}</button></div>`;}
-function validate(s){if(!CITIES.includes(s.city)||!EVENT_TYPES.includes(s.event_type)||!CATEGORIES.some(c=>c[0]===s.category)||!LANGUAGES.includes(s.language))throw Error('Choose one of the listed options.');if(!/^2026-\d{2}-\d{2}$/.test(s.event_date)||s.event_date<'2026-09-23'||s.event_date>'2026-12-31'||new Date(s.event_date+'T12:00:00Z').toISOString().slice(0,10)!==s.event_date)throw Error('Choose a date between September 23 and December 31, 2026.');if(!Number.isFinite(s.budget_kzt)||s.budget_kzt<=0||s.budget_kzt>1000000000)throw Error('Enter a positive budget up to ₸1,000,000,000.');if(s.duration_hours!==null&&(!Number.isFinite(s.duration_hours)||s.duration_hours<.5||s.duration_hours>168))throw Error('Enter a duration from 0.5 to 168 hours, or leave it blank.');}
-function match(s){validate(s);const candidates=CATALOG.filter(p=>p.city===s.city&&p.categories.includes(s.category));const excluded={booked:0,budget:0,format:0,language:0,duration:0};const eligible=candidates.filter(p=>{const failures={booked:p.busy_dates.includes(s.event_date),budget:p.price_from_kzt>s.budget_kzt,format:!p.event_formats.includes(s.event_type),language:s.language!=='Any language'&&!p.languages.includes(s.language),duration:s.duration_hours!==null&&p.max_hours!==null&&p.max_hours<s.duration_hours};for(const k in failures)if(failures[k])excluded[k]++;return !Object.values(failures).some(Boolean);}).sort((a,b)=>a.price_from_kzt-b.price_from_kzt||a.id.localeCompare(b.id));return{status:!candidates.length?'category_unavailable':!eligible.length?'no_matches':'matches_found',cards:eligible.slice(0,3),total:eligible.length,candidate_count:candidates.length,excluded};}
-function reason(p){const budget=p.price_from_kzt<state.budget_kzt?`${money(state.budget_kzt-p.price_from_kzt)} below your budget`:'at your budget limit';let fit=`Available on ${dateLabel(state.event_date)}, with a starting price ${budget}`;if(state.language!=='Any language')fit+=`, working in ${state.language}`;if(state.duration_hours&&p.max_hours!==null)fit+=`, and able to cover your ${state.duration_hours} hours`;return `${p.description} ${fit}.`;}
-function chips(){return `<div class="chips"><span class="chip">${icon('pin')}${esc(state.city)}</span><span class="chip">${icon('calendar')}${dateLabel(state.event_date)}</span><span class="chip">${esc(state.event_type)}</span><span class="chip">${esc(state.category)}</span><span class="chip">Up to ${money(state.budget_kzt)}</span>${state.duration_hours?`<span class="chip">${state.duration_hours} hours</span>`:''}${state.language!=='Any language'?`<span class="chip">${esc(state.language)}</span>`:''}</div>`;}
-const initials=p=>p.anon_name.split(' ').slice(0,2).map(x=>x[0]).join('');
-function card(p,i){return `<article class="contractor-card"><div class="contractor-top"><div class="avatar ${i%2?'secondary':''}" aria-hidden="true">${initials(p)}</div><div><h2>${esc(p.anon_name)}</h2><div class="meta">${esc(p.categories[0])} · ${esc(p.city)}</div></div></div><span class="synthetic">Synthetic demo profile</span><div class="price"><small>From </small>${money(p.price_from_kzt)}</div><div class="meta">Per event · Starting price</div><div class="available">${icon('check')}Available ${dateLabel(state.event_date)}</div><div class="match-reason"><strong>${icon('sparkles')}WHY THIS MATCHES</strong><p>${esc(reason(p))}</p></div>${button('Explore profile','profile/'+p.id,false,'arrow')}</article>`;}
-const reasonLabels={booked:'booked on your date',budget:'above your budget',format:'not available for this event format',language:'not working in your chosen language',duration:'unable to cover the requested hours'};
-function resultSummary(){if(activeResults.total>=3)return `Showing ${Math.min(3,activeResults.total)} of ${activeResults.total} available matches, ordered by starting price.`;const reasons=Object.entries(activeResults.excluded).filter(([,n])=>n).map(([k])=>reasonLabels[k]);return reasons.length?`Only ${activeResults.total} ${activeResults.total===1?'profile meets':'profiles meet'} every requirement. Other candidates are ${reasons.join(', ')}.`:`There ${activeResults.total===1?'is only 1 matching profile':`are only ${activeResults.total} matching profiles`} in this city and category.`;}
-function resultsPage(){return `<div class="result-heading"><div>${header('Your shortlist',`${activeResults.cards.length} thoughtful ${activeResults.cards.length===1?'match':'matches'}.`,'Available on your date. Selected around your event.')}</div>${button('Edit search','review',false,'sliders')}</div>${chips()}<div class="result-note">${icon('info')}<span>${esc(resultSummary())}</span></div><div class="contractor-grid">${activeResults.cards.map(card).join('')}</div><p class="result-bottom">Prices are starting rates, not final quotes. Sample catalog · No booking or contact requests are sent.</p>`;}
-function profilePage(id){const p=activeResults?.cards.find(p=>p.id===id);if(!p){navigate('review');return '';}return `${button('Back to matches','results',false,'back')}<div class="profile-layout"><article class="profile-main"><div class="profile-head"><div class="avatar" aria-hidden="true">${initials(p)}</div><div><h1>${esc(p.anon_name)}</h1><p class="meta">${esc(p.categories[0])} · ${esc(p.city)}</p><span class="synthetic">Synthetic demo profile</span></div></div><div class="match-reason"><strong>${icon('sparkles')}WHY THIS MATCHES YOUR EVENT</strong><p>${esc(reason(p))}</p></div><h2>A little about ${esc(p.anon_name)}</h2><p>${esc(p.description)}</p><h2>The details</h2><dl class="facts"><div><dt>Event formats</dt><dd>${esc(p.event_formats.join(' · '))}</dd></div><div><dt>Working languages</dt><dd>${esc(p.languages.join(' · '))}</dd></div><div><dt>Duration</dt><dd>${p.max_hours===null?'Not tied to on-site hours':`Up to ${p.max_hours} hours on site`}</dd></div></dl></article><aside class="profile-aside"><div class="eyebrow">At a glance</div><div class="price">${money(p.price_from_kzt)}</div><p>Starting price per event</p><div class="available">${icon('check')}Available ${dateLabel(state.event_date)}</div><hr class="divider"><h2>Fits your budget</h2><p>${p.price_from_kzt<state.budget_kzt?`${money(state.budget_kzt-p.price_from_kzt)} below your maximum budget.`:'Starting price is at your budget limit.'} Final scope and price may vary.</p>${button('Back to shortlist','results',false,'back')}</aside></div>`;}
-function emptyPage(categoryMissing){return `<section class="empty-page"><div class="empty-icon">${icon(categoryMissing?'search':'calendar')}</div><div class="eyebrow" style="justify-content:center">${categoryMissing?'Category not listed':'No matches this time'}</div><h1>${categoryMissing?`No ${esc(state.category.toLowerCase())} profiles<br>in ${esc(state.city)} yet.`:'A small change could<br>make a difference.'}</h1><p class="intro">${categoryMissing?'This sample catalog doesn’t have that city and category combination. Try another category or city.':`There are ${esc(state.category.toLowerCase())} profiles in ${esc(state.city)}, but none meet all your current requirements.`}</p>${chips()}${categoryMissing?'':`<div class="summary-card"><div class="summary-title"><h2>What prevented a match</h2></div>${summaryRows(Object.entries(activeResults.excluded).filter(([,n])=>n).map(([k,n])=>[({booked:'Availability',budget:'Budget',format:'Event format',language:'Language',duration:'Duration'})[k],`${n} ${n===1?'profile':'profiles'} ${reasonLabels[k]}`]))}<p class="hint">A profile can fail more than one requirement.</p></div>`}<div class="actions">${categoryMissing?button('Change category','category',true,'arrow')+button('Change city','event',false,'pin'):button('Edit requirements','review',true,'sliders')+button('Change date','event',false,'calendar')}</div></section>`;}
-async function runSearch(){if(searching)return;validate(state);searching=true;main.innerHTML='<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Checking your event requirements…</div>';await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));activeResults=match(state);searching=false;const route=activeResults.status==='matches_found'?'results':activeResults.status==='category_unavailable'?'no-category':'no-matches';navigate(route);announce(`${activeResults.cards.length} matches found. ${activeResults.status==='category_unavailable'?'No profiles in this city and category.':''}`);return activeResults;}
-function render(){let route=location.hash.slice(1)||'event';const step=STEPS.findIndex(s=>s[0]===route);if(step>furthest){navigate(STEPS[furthest][0]);return;}if(['results','no-category','no-matches'].includes(route)||route.startsWith('profile/')){if(!activeResults){navigate(furthest===3?'review':'event');return;}if(!route.startsWith('profile/')){const actual=activeResults.status==='matches_found'?'results':activeResults.status==='category_unavailable'?'no-category':'no-matches';if(route!==actual){navigate(actual);return;}}}sidebar(route);const screens={event:eventPage,category:categoryPage,preferences:preferencesPage,review:reviewPage,results:resultsPage,'no-category':()=>emptyPage(true),'no-matches':()=>emptyPage(false)};if(route.startsWith('profile/'))main.innerHTML=profilePage(route.split('/')[1]);else if(screens[route])main.innerHTML=screens[route]();else{navigate('event');return;}document.title=({event:'Event details',category:'Choose a category',preferences:'Your preferences',review:'Review your event',results:'Your matches','no-category':'Category unavailable','no-matches':'No matching contractors'})[route]+' · EventMatch';if(route.startsWith('profile/'))document.title='Contractor profile · EventMatch';main.focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});}
-document.addEventListener('click',event=>{const categoryButton=event.target.closest('[data-category]');if(categoryButton){if(state.category!==categoryButton.dataset.category)activeResults=null;state.category=categoryButton.dataset.category;main.querySelectorAll('[data-category]').forEach(b=>{b.setAttribute('aria-checked',String(b===categoryButton));b.tabIndex=b===categoryButton?0:-1;});sidebar('category');return;}const go=event.target.closest('[data-go]');if(go){if(go.disabled)return;const route=go.dataset.go,current=location.hash.slice(1)||'event';const form=main.querySelector('form');const next=STEPS.findIndex(s=>s[0]===route);const currentIndex=STEPS.findIndex(s=>s[0]===current);if(form&&next>currentIndex&&!form.reportValidity())return;capture();if(current==='category'&&route==='preferences')furthest=Math.max(furthest,2);navigate(route);return;}if(event.target.closest('#find-matches'))runSearch().catch(showError);});
-document.addEventListener('keydown',event=>{const el=event.target.closest('[data-category]');if(!el||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key))return;event.preventDefault();const buttons=[...main.querySelectorAll('[data-category]')];let index=buttons.indexOf(el);index=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+buttons.length)%buttons.length;buttons[index].click();buttons[index].focus();});
-document.addEventListener('submit',event=>{event.preventDefault();if(!event.target.reportValidity())return;capture();if(event.target.id==='event-form'){furthest=Math.max(furthest,1);navigate('category');}else if(event.target.id==='preferences-form'){furthest=3;navigate('review');}});
-function showError(error){searching=false;main.innerHTML=reviewPage()+`<p class="error" role="alert">${esc(error.message)}</p>`;}
-window.addEventListener('hashchange',render);render();
-
-// Optional browser-agent interface. It uses the same validation and search as the UI.
-if(document.modelContext?.registerTool){try{Promise.resolve(document.modelContext.registerTool({name:'find_demo_contractors',title:'Find demo contractors',description:'Apply event requirements to the visible UI and find up to three synthetic demo contractors. Does not book or contact anyone.',inputSchema:{type:'object',properties:{city:{type:'string',enum:CITIES},event_date:{type:'string',format:'date'},event_type:{type:'string',enum:EVENT_TYPES},category:{type:'string',enum:CATEGORIES.map(c=>c[0])},budget_kzt:{type:'number',minimum:1,maximum:1000000000},duration_hours:{type:['number','null'],minimum:.5,maximum:168},language:{type:'string',enum:LANGUAGES}},required:['city','event_date','event_type','category','budget_kzt'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:async input=>{const next={...state,...input,duration_hours:input.duration_hours??null,language:input.language??'Any language'};validate(next);Object.assign(state,next);furthest=3;const result=await runSearch();render();return{status:result.status,count:result.cards.length,contractors:result.cards.map(p=>({id:p.id,name:p.anon_name,starting_price_kzt:p.price_from_kzt})),synthetic:true};}})).catch(()=>{});}catch{/* Standard is optional; all visible UI remains available. */}}
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+const money = n => new Intl.NumberFormat('ru-RU').format(n) + ' ₸';
+const dateLabel = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? new Intl.DateTimeFormat('ru-RU', {timeZone:'UTC'}).format(new Date(d + 'T12:00:00Z')) : 'Не указана';
+const main = document.getElementById('main');
+const STEPS = [['event','Событие','Город, дата и формат'], ['category','Подрядчик','Кто вам нужен'], ['preferences','Условия','Бюджет и пожелания'], ['review','Проверка','Проверьте перед подбором']];
+const blankQuery = () => ({city:'', event_date:'', event_type:'', category:'', budget_kzt:null, duration_hours:null, language:'', wishes:[], unverified_requirements:[]});
+let state = blankQuery(), options = null, activeResults = null, previousSearch = null, busy = false, rawBrief = '', error = '';
+const categoryIcons = {'Ведущий':'mic','Фотограф':'camera','Видеограф':'camera','Флорист':'flower','Декоратор':'sparkles','Банкетный зал':'building','Ресторан':'building','Отель':'bed','Загородная площадка':'building','Подарки и сувениры':'gift','Ведущий церемонии':'heart','Фото и видеобудки':'image','Инструменталист':'music','Лайв-бэнд':'music','Национальный ансамбль':'music','Танцевальный коллектив':'sparkles','Шоу-программа':'sparkles'};
+const button = (text, route, primary = false, ico = 'arrow') => `<button type="button" class="btn ${primary ? 'btn-primary' : ''}" data-go="${esc(route)}">${icon(ico)}${esc(text)}</button>`;
+const header = (kicker, title, subtitle) => `<div class="eyebrow">${esc(kicker)}</div><h1>${title}</h1><p class="intro">${esc(subtitle)}</p>`;
+const selectOptions = (values, selected, placeholder = 'Выберите') => `<option value="">${esc(placeholder)}</option>` + values.map(v => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(v)}</option>`).join('');
+const selectField = (label, name, values, value, required = true) => `<div class="field"><label for="${name}">${esc(label)}</label><select id="${name}" name="${name}" ${required ? 'required' : ''}>${selectOptions(values, value, required ? 'Выберите' : 'Не важно')}</select></div>`;
+function announce(text) { document.getElementById('announcer').textContent = text; }
+function navigate(route) { if (location.hash.slice(1) === route) render(); else location.hash = route; }
+async function api(path, payload) {
+  const response = await fetch(path, {method: payload === undefined ? 'GET' : 'POST', headers: payload === undefined ? {} : {'Content-Type':'application/json'}, body: payload === undefined ? undefined : JSON.stringify(payload), signal: AbortSignal.timeout(10000)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'Сервис недоступен. Попробуйте ещё раз.');
+  return data;
+}
+function capture() {
+  const form = main.querySelector('form[data-query]');
+  if (!form) return;
+  const before = JSON.stringify(state), data = new FormData(form);
+  for (const [k,v] of data.entries()) {
+    if (k === 'wish') continue;
+    if (k === 'unverified_requirements') state[k] = String(v).split('\n').map(s => s.trim()).filter(Boolean);
+    else state[k] = ['budget_kzt','duration_hours'].includes(k) ? (v === '' ? null : Number(v)) : v;
+  }
+  if (form.querySelector('[data-wishes]')) state.wishes = data.getAll('wish').sort();
+  if (JSON.stringify(state) !== before) activeResults = null;
+}
+function sidebar(route) {
+  const active = STEPS.findIndex(s => s[0] === route);
+  document.getElementById('step-nav').innerHTML = STEPS.map(([key,name,sub], i) => `<button type="button" data-go="${key}" class="step-button ${i === active ? 'active' : ''}" ${busy ? 'disabled' : ''} ${i === active ? 'aria-current="step"' : ''}><span class="number">${i+1}</span><span><strong>${name}</strong><small>${sub}</small></span></button>`).join('');
+  document.getElementById('brief-data').innerHTML = [['Город',state.city || 'Не указан'],['Дата',dateLabel(state.event_date)],['Формат',state.event_type || 'Не указан'],['Категория',state.category || 'Не указана'],['Бюджет',state.budget_kzt ? money(state.budget_kzt) : 'Не указан']].map(([k,v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+function briefPage() {
+  return header('AI-консультант','Расскажите о событии.<br>Найдём <em>ваших людей.</em>','Опишите мероприятие своими словами. Мы предложим условия для вашего подтверждения.') +
+    `<form id="brief-form" class="content-form"><div class="form-card"><label for="brief">Какое мероприятие вы планируете?</label><textarea id="brief" name="text" rows="5" maxlength="2000" required placeholder="Ведущий на корпоратив в Алматы 6 октября 2026, до 1 300 000 тенге, на русском, на 6 часов. Хочется спокойной атмосферы.">${esc(rawBrief)}</textarea><p class="hint">Город, дата, формат, категория и бюджет обязательны. Язык, часы работы и пожелания — по желанию.</p><p class="hint">Текст отправляется в OpenAI для разбора. Не указывайте контакты и личные данные гостей.</p>${!options.ai_enabled ? '<p class="error">AI-консультант пока недоступен. Условия можно заполнить вручную.</p>' : ''}</div><div class="actions">${button('Заполнить вручную','event',false,'sliders')}<button class="btn btn-primary" type="submit" ${!options.ai_enabled ? 'disabled' : ''}>Понять запрос ${icon('sparkles')}</button></div></form><div class="helper-note">${icon('shield')}<span>Никого не бронируем. Сначала вы проверите параметры, затем получите до трёх рекомендаций.</span></div><section class="demo-examples" aria-label="Примеры по исходному каталогу"><p class="hint">Можно начать с проверенного примера:</p><div class="actions"><button class="btn" data-example="hosts">Ведущие в Алматы</button><button class="btn" data-example="rare">Флорист в Астане</button><button class="btn" data-example="empty">Занято на дату</button></div></section>`;
+}
+function eventFields() {
+  return selectField('Город','city',options.cities,state.city) + selectField('Формат мероприятия','event_type',options.event_types,state.event_type) + `<div class="field"><label for="event_date">Дата мероприятия</label><input id="event_date" name="event_date" type="date" required value="${esc(state.event_date)}" min="${options.first_date}" max="${options.last_date}" aria-describedby="date-hint"><p class="hint" id="date-hint">Календарь доступен с 23.09.2026 по 31.12.2026.</p></div>`;
+}
+function eventPage() {
+  return header('01 / Мероприятие','Каждое событие начинается<br>с <em>деталей.</em>','Укажите место, дату и повод для встречи.') + `<form id="event-form" data-query class="content-form"><div class="form-card">${eventFields()}</div><div class="actions">${button('К описанию','brief',false,'back')}<button type="submit" class="btn btn-primary">Выбрать подрядчика ${icon('arrow')}</button></div></form>`;
+}
+function categoryPage() {
+  return header('02 / Подрядчик','Кто поможет воплотить<br><em>вашу идею?</em>','Выберите одну категорию. Проверим доступность и условия по каталогу.') + `<div class="category-grid" role="radiogroup" aria-label="Категория подрядчика">${options.categories.map((name,i) => `<button type="button" role="radio" aria-checked="${state.category === name}" tabindex="${state.category === name || !state.category && i === 0 ? '0' : '-1'}" class="category-option" data-category="${esc(name)}"><span class="category-icon">${icon(categoryIcons[name])}</span><strong>${esc(name)}</strong><span class="radio-mark" aria-hidden="true"></span></button>`).join('')}</div><div class="actions">${button('Назад','event',false,'back')}<button class="btn btn-primary" data-go="preferences" ${!state.category ? 'disabled' : ''}>Указать условия ${icon('arrow')}</button></div>`;
+}
+function preferenceFields() {
+  return `<div class="field"><label for="budget_kzt">Максимальный бюджет, ₸</label><input id="budget_kzt" name="budget_kzt" type="number" min="1" max="1000000000" step="1" required value="${state.budget_kzt ?? ''}" aria-describedby="budget-hint"><p class="hint" id="budget-hint">На одного подрядчика за мероприятие. Цена «от» не гарантирует итоговую стоимость.</p></div><div class="field-row"><div class="field"><label for="duration_hours">Часы работы подрядчика</label><input id="duration_hours" name="duration_hours" type="number" min="0.1" max="168" step="any" placeholder="Не важно" value="${state.duration_hours ?? ''}"></div>${selectField('Язык работы','language',options.languages,state.language,false)}</div>`;
+}
+function wishFields() {
+  return `<fieldset data-wishes class="wish-fieldset"><legend>Пожелания к стилю — необязательно</legend><p class="hint">Влияют на порядок, но не являются гарантией услуги. Выберите то, что действительно важно.</p>${!options.semantic_enabled ? '<p class="hint">Смысловой подбор пока недоступен: сейчас результаты будут упорядочены по начальной цене.</p>' : ''}<div class="wish-grid">${options.wishes.map(w => `<label class="wish-option"><input type="checkbox" name="wish" value="${w.id}" ${state.wishes.includes(w.id) ? 'checked' : ''}><span>${esc(w.label)}</span></label>`).join('')}</div></fieldset>`;
+}
+function unresolvedFields() {
+  if (!state.unverified_requirements.length) return '';
+  return `<div class="form-card unresolved"><label for="unverified_requirements">Нужно уточнить перед подбором</label><p class="hint">Эти условия нельзя проверить по доступным полям или учесть выбранными пожеланиями. Уточните описание события либо уберите их из этого поля, только если согласны продолжить без них.</p><textarea id="unverified_requirements" name="unverified_requirements" rows="3">${esc(state.unverified_requirements.join('\n'))}</textarea></div>`;
+}
+function preferencesPage() {
+  return header('03 / Условия','Подходящий вариант.<br><em>В рамках бюджета.</em>','Язык и длительность станут строгими условиями, если вы их укажете.') + `<form id="preferences-form" data-query class="content-form"><div class="form-card">${preferenceFields()}</div>${wishFields()}${unresolvedFields()}<div class="actions">${button('Назад','category',false,'back')}<button type="submit" class="btn btn-primary">Проверить параметры ${icon('arrow')}</button></div></form>`;
+}
+function reviewPage() {
+  return header('04 / Подтверждение','Всё верно?<br>Найдём <em>подходящих.</em>','Проверьте распознанные условия. Любое поле можно исправить перед поиском.') + `${rawBrief ? `<details class="source-brief"><summary>Исходное описание</summary><p>${esc(rawBrief)}</p>${button('Уточнить описание','brief',false,'back')}</details>` : ''}<form id="review-form" data-query><div class="summary-grid"><section class="summary-card"><h2>Ваше мероприятие</h2>${eventFields()}</section><section class="summary-card"><h2>Ваш подрядчик</h2>${selectField('Категория','category',options.categories,state.category)}${preferenceFields()}</section></div>${wishFields()}${unresolvedFields()}<div class="review-note">${icon('sparkles')}<p><strong>До трёх вариантов, с конкретными причинами.</strong>Сначала проверим условия и занятость, затем учтём выбранные пожелания.</p></div><div class="actions">${button('К описанию','brief',false,'back')}<button type="submit" class="btn btn-primary">Подтвердить и подобрать ${icon('arrow')}</button></div></form>`;
+}
+function chips() {
+  const values = [state.city,dateLabel(state.event_date),state.event_type,state.category,'До ' + money(state.budget_kzt)];
+  if (state.duration_hours) values.push(state.duration_hours + ' ч работы');
+  if (state.language) values.push(state.language);
+  for (const id of state.wishes) values.push(options.wishes.find(w => w.id === id)?.label || id);
+  return `<div class="chips">${values.map(v => `<span class="chip">${esc(v)}</span>`).join('')}</div>`;
+}
+function provenance(p) {
+  return `<span class="synthetic">${p.synthetic ? 'Синтетический профиль организаторов' : 'Исходный каталог · анонимизировано'}</span>${p.price_imputed ? '<p class="hint">Цена дополнена при подготовке данных.</p>' : ''}${p.city_imputed ? '<p class="hint">Город дополнен при подготовке данных.</p>' : ''}`;
+}
+const initials = p => p.anon_name.split(' ').slice(0,2).map(x => x[0]).join('');
+function card(p,i) {
+  return `<article class="contractor-card"><div class="contractor-top"><div class="avatar ${i % 2 ? 'secondary' : ''}" aria-hidden="true">${esc(initials(p))}</div><div><h2>${esc(p.anon_name)}</h2><div class="meta">${esc(p.matched_category)} · ${esc(p.city)}</div></div></div>${provenance(p)}<div class="price"><small>От </small>${money(p.price_from_kzt)}</div><p class="meta">За мероприятие · начальная цена</p><div class="available">${icon('check')}Нет отметки о занятости ${dateLabel(state.event_date)}</div><div class="match-reason"><strong>${icon('sparkles')}ПОЧЕМУ В ПОДБОРКЕ</strong><p>${esc(p.explanation)}</p></div>${button('Посмотреть профиль','profile/' + p.id)}</article>`;
+}
+function resultsPage() {
+  const r = activeResults;
+  return `<div class="result-heading"><div>${header('Ваша подборка',`Подходящих вариантов: <em>${r.cards.length}</em>`,'Выбор из исходного каталога по подтверждённым условиям.')}</div>${button('Изменить условия','review',false,'sliders')}</div>${chips()}<div class="result-note">${icon('info')}<span>${esc(r.message)}</span></div>${r.notice ? `<p class="result-note">${esc(r.notice)}</p>` : ''}<p class="result-note">Порядок: ${r.ranking === 'semantic' ? 'смысловая близость пожеланиям, затем начальная цена и id' : 'начальная цена, затем id'}.</p>${r.date_change ? `<p class="review-note">${esc(r.date_change)}</p>` : ''}<div class="contractor-grid">${r.cards.map(card).join('')}</div><p class="result-bottom">Цены «от» не являются окончательным предложением. Сведения и заявления взяты из каталога; бронирование не выполняется.</p>`;
+}
+function emptyPage() {
+  const absent = activeResults.status === 'category_unavailable';
+  return `<section class="empty-page"><div class="empty-icon">${icon(absent ? 'search' : 'calendar')}</div>${header('Результат подбора',absent ? 'В городе нет<br><em>такой категории.</em>' : 'По этим условиям<br><em>совпадений нет.</em>','Условия сохранены — их можно изменить и повторить поиск.')}${chips()}<div class="summary-card"><p>${esc(activeResults.message)}</p></div>${activeResults.date_change ? `<p class="review-note">${esc(activeResults.date_change)}</p>` : ''}${activeResults.notice ? `<p class="hint">${esc(activeResults.notice)}</p>` : ''}<div class="actions">${button('Изменить условия','review',true,'sliders')}${button('Изменить дату','event',false,'calendar')}</div></section>`;
+}
+function profilePage(id) {
+  const p = activeResults?.cards.find(p => p.id === id);
+  if (!p) { navigate('review'); return ''; }
+  return `${button('К подборке','results',false,'back')}<div class="profile-layout"><article class="profile-main"><div class="profile-head"><div class="avatar" aria-hidden="true">${esc(initials(p))}</div><div><h1>${esc(p.anon_name)}</h1><p class="meta">${esc(p.categories.join(' · '))} · ${esc(p.city)}</p>${provenance(p)}</div></div><div class="match-reason"><strong>ПОЧЕМУ В ПОДБОРКЕ</strong><p>${esc(p.explanation)}</p></div><h2>Описание из каталога</h2><p>${esc(p.description)}</p><p class="hint">Текст профиля содержит заявления автора; награды и отзывы отдельно не проверялись. Для строгих условий используются поля ниже.</p><h2>Условия работы</h2><dl class="facts"><div><dt>Форматы</dt><dd>${esc(p.event_formats.join(' · '))}</dd></div><div><dt>Языки</dt><dd>${esc(p.languages.join(' · '))}</dd></div><div><dt>Длительность</dt><dd>${p.max_hours === null ? 'Присутствие на площадке не требуется' : 'До ' + p.max_hours + ' ч на площадке'}</dd></div></dl></article><aside class="profile-aside"><div class="eyebrow">Условия предложения</div><div class="price">От ${money(p.price_from_kzt)}</div><p>За мероприятие, окончательная цена может отличаться.</p><div class="available">${icon('check')}Нет отметки о занятости ${dateLabel(state.event_date)}</div><p>Бюджет: ${money(state.budget_kzt)}.</p>${button('К подборке','results',false,'back')}</aside></div>`;
+}
+function dateChange(query, result) {
+  if (!previousSearch || previousSearch.query.event_date === query.event_date || previousSearch.result.data_version !== result.data_version) return '';
+  const stripDate = q => JSON.stringify({...q,event_date:''});
+  if (stripDate(previousSearch.query) !== stripDate(query)) return '';
+  const removed = previousSearch.result.cards.filter(p => p.busy_dates.includes(query.event_date)).map(p => p.anon_name);
+  return removed.length ? `По сравнению с ${dateLabel(previousSearch.query.event_date)} исключены из прошлой подборки: ${removed.join(', ')} — заняты ${dateLabel(query.event_date)}.` : `Изменена только дата: ${dateLabel(previousSearch.query.event_date)} → ${dateLabel(query.event_date)}; совпадений по календарю было ${previousSearch.result.total}, стало ${result.total}.`;
+}
+async function runSearch() {
+  if (busy) return;
+  capture();
+  if (state.unverified_requirements.length) { error = 'Остались непроверяемые требования. Уточните их или явно уберите перед подбором.'; render(); return; }
+  const query = structuredClone(state);
+  busy = true; error = ''; render();
+  try {
+    const result = await api('/api/matches',query);
+    result.date_change = dateChange(query,result);
+    activeResults = result;
+    previousSearch = {query,result};
+    busy = false;
+    navigate(result.status === 'matches_found' ? 'results' : result.status === 'category_unavailable' ? 'no-category' : 'no-matches');
+    announce(result.message);
+  } catch (e) { busy = false; error = requestError(e); render(); }
+}
+function requestError(e) { return ['TimeoutError','AbortError'].includes(e.name) ? 'Сервис не ответил вовремя. Условия сохранены, попробуйте ещё раз.' : e.message; }
+function render() {
+  if (!options) return;
+  let route = location.hash.slice(1) || 'brief';
+  if (['results','no-category','no-matches'].includes(route) || route.startsWith('profile/')) {
+    if (!activeResults) { navigate('review'); return; }
+    if (!route.startsWith('profile/')) {
+      const actual = activeResults.status === 'matches_found' ? 'results' : activeResults.status === 'category_unavailable' ? 'no-category' : 'no-matches';
+      if (actual !== route) { navigate(actual); return; }
+    }
+  }
+  sidebar(route);
+  if (busy) { main.setAttribute('aria-busy','true'); main.innerHTML = '<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Проверяем запрос…</div>'; return; }
+  main.removeAttribute('aria-busy');
+  const screens = {brief:briefPage,event:eventPage,category:categoryPage,preferences:preferencesPage,review:reviewPage,results:resultsPage,'no-category':emptyPage,'no-matches':emptyPage};
+  if (route.startsWith('profile/')) main.innerHTML = profilePage(route.split('/')[1]);
+  else if (screens[route]) main.innerHTML = screens[route]();
+  else { navigate('brief'); return; }
+  if (error) { main.insertAdjacentHTML('afterbegin',`<p class="error request-error" role="alert" tabindex="-1">${esc(error)}</p>`); main.querySelector('.request-error').focus(); }
+  else main.focus({preventScroll:true});
+  document.title = (route === 'brief' ? 'AI-подбор подрядчиков' : STEPS.find(s => s[0] === route)?.[1] || 'Подбор подрядчиков') + ' · EventMatch';
+  window.scrollTo({top:0,behavior:'instant'});
+}
+document.addEventListener('input',e => { if (e.target.id === 'brief') rawBrief = e.target.value; });
+document.addEventListener('click',e => {
+  if (e.target.closest('.skip-link')) { e.preventDefault(); main.focus(); return; }
+  if (busy) { if (e.target.closest('a,button')) e.preventDefault(); return; }
+  const sample = e.target.closest('[data-example]');
+  if (sample) {
+    rawBrief = ''; error = ''; activeResults = null;
+    state = sample.dataset.example === 'hosts' ? {...blankQuery(),city:'Алматы',event_date:'2026-10-06',event_type:'корпоратив',category:'Ведущий',budget_kzt:1300000,duration_hours:6,language:'русский'} : {...blankQuery(),city:'Астана',event_date:sample.dataset.example === 'rare' ? '2026-10-01' : '2026-10-02',event_type:'свадьба',category:'Флорист',budget_kzt:300000,language:'русский'};
+    navigate('review'); return;
+  }
+  const category = e.target.closest('[data-category]');
+  if (category) { state.category = category.dataset.category; activeResults = null; render(); main.querySelector(`[data-category="${CSS.escape(state.category)}"]`).focus(); return; }
+  const go = e.target.closest('[data-go]');
+  if (go && !go.disabled) { capture(); error = ''; navigate(go.dataset.go); }
+});
+document.addEventListener('keydown',e => {
+  const el = e.target.closest('[data-category]');
+  if (!el || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) return;
+  e.preventDefault(); const buttons = [...main.querySelectorAll('[data-category]')];
+  const i = buttons.indexOf(el), next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length-1 : (i + (['ArrowLeft','ArrowUp'].includes(e.key) ? -1 : 1) + buttons.length) % buttons.length;
+  buttons[next].click();
+});
+document.addEventListener('submit',async e => {
+  e.preventDefault(); if (busy || !e.target.reportValidity()) return;
+  error = '';
+  if (e.target.id === 'brief-form') {
+    rawBrief = new FormData(e.target).get('text'); busy = true; render();
+    try {
+      const q = await api('/api/briefs',{text:rawBrief});
+      state = {...blankQuery(),...q,city:q.city || '',category:q.category || '',event_type:q.event_type || '',event_date:q.event_date || '',language:q.language || '',wishes:q.wishes || [],unverified_requirements:q.unverified_requirements || []};
+      activeResults = null; busy = false; navigate('review');
+    } catch (err) { busy = false; error = requestError(err); render(); }
+  } else if (e.target.id === 'review-form') await runSearch();
+  else { capture(); navigate(e.target.id === 'event-form' ? 'category' : 'review'); }
+});
+window.addEventListener('hashchange',() => { capture(); error = ''; render(); });
+async function start() {
+  main.innerHTML = '<div class="loading-state" role="status">Загружаем каталог…</div>';
+  try { options = await api('/api/options'); document.getElementById('catalog-count').textContent = options.profile_count + ' профилей'; render(); }
+  catch { main.innerHTML = '<div class="form-card"><h1>Сервис недоступен</h1><p>Не удалось загрузить каталог. Откройте приложение через запущенный сервер и повторите попытку.</p><button class="btn btn-primary" id="retry-start">Повторить</button></div>'; document.getElementById('retry-start').onclick = start; }
+}
+start();
