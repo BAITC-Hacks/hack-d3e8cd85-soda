@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -374,5 +378,271 @@ func TestSearchLatency(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatal(fmt.Sprintf("100 local searches took %s", elapsed))
+	}
+}
+
+func TestHealthSearchAndCORS(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "")
+	a := catalog(t)
+	calls := 0
+	a.Search = func(ctx context.Context, query Query, profiles []Profile) (Result, error) {
+		calls++
+		if !reflect.DeepEqual(profiles, a.Profiles) {
+			t.Error("catalog snapshot not passed to backend")
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("search context has no deadline")
+		}
+		if !reflect.DeepEqual(query, hostQuery()) {
+			t.Errorf("query changed before reaching the backend: %#v", query)
+		}
+		return a.match(query), nil
+	}
+	handler := a.handler()
+
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if health.Code != http.StatusOK || health.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("health: status=%d cors=%q", health.Code, health.Header().Get("Access-Control-Allow-Origin"))
+	}
+	var healthBody map[string]string
+	if err := json.NewDecoder(health.Body).Decode(&healthBody); err != nil || healthBody["status"] != "ok" {
+		t.Fatalf("health body: %#v, err=%v", healthBody, err)
+	}
+
+	body, err := json.Marshal(hostQuery())
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://localhost:3000")
+	handler.ServeHTTP(search, request)
+	if search.Code != http.StatusOK || search.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("search: status=%d cors=%q", search.Code, search.Header().Get("Access-Control-Allow-Origin"))
+	}
+	var result Result
+	if err := json.NewDecoder(search.Body).Decode(&result); err != nil || result.Status != "matches_found" {
+		t.Fatalf("search body: status=%q, err=%v", result.Status, err)
+	}
+	if calls != 1 {
+		t.Fatalf("backend calls: got %d, want 1", calls)
+	}
+
+	preflight := httptest.NewRecorder()
+	options := httptest.NewRequest(http.MethodOptions, "/api/search", nil)
+	handler.ServeHTTP(preflight, options)
+	if preflight.Code != http.StatusNoContent || preflight.Header().Get("Access-Control-Allow-Methods") == "" {
+		t.Fatalf("preflight: status=%d methods=%q", preflight.Code, preflight.Header().Get("Access-Control-Allow-Methods"))
+	}
+	for _, response := range []*httptest.ResponseRecorder{health, search, preflight} {
+		if response.Header().Get("Access-Control-Allow-Methods") != "GET, POST, OPTIONS" || response.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Authorization" {
+			t.Fatalf("incomplete CORS headers: %v", response.Header())
+		}
+	}
+}
+
+func TestSearchValidationAndBackendFailures(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "")
+	valid, _ := json.Marshal(hostQuery())
+	for _, tc := range []struct {
+		name, body, contentType string
+		backend                 SearchFunc
+		status                  int
+	}{
+		{"malformed JSON", "{", "application/json", nil, 400},
+		{"invalid fields", "{}", "application/json", nil, 422},
+		{"wrong media type", string(valid), "application/json-invalid", nil, 415},
+		{"unconfigured", string(valid), "application/json", nil, 503},
+		{"backend failure", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) {
+			return Result{}, errors.New("private backend details")
+		}, 503},
+		{"timeout", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) { return Result{}, context.DeadlineExceeded }, 504},
+		{"panic", string(valid), "application/json", func(context.Context, Query, []Profile) (Result, error) { panic("private backend details") }, 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := catalog(t)
+			a.Search = tc.backend
+			request := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", tc.contentType)
+			response := httptest.NewRecorder()
+			a.handler().ServeHTTP(response, request)
+			if response.Code != tc.status || response.Header().Get("Access-Control-Allow-Origin") != "*" {
+				t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body)
+			}
+			var body struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Error.Code == "" || strings.Contains(response.Body.String(), "private backend details") {
+				t.Fatalf("invalid or unsafe error response: %s", response.Body)
+			}
+		})
+	}
+}
+
+func TestConfiguredFrontendOrigin(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://events.example")
+	a := catalog(t)
+	a.Search = func(ctx context.Context, query Query, profiles []Profile) (Result, error) { return a.match(query), nil }
+	body, _ := json.Marshal(hostQuery())
+	request := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewReader(body))
+	request.Header.Set("Origin", "https://events.example")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	response := httptest.NewRecorder()
+	a.handler().ServeHTTP(response, request)
+	if response.Code != 200 || response.Header().Get("Access-Control-Allow-Origin") != "https://events.example" {
+		t.Fatalf("configured frontend rejected: %d %v", response.Code, response.Header())
+	}
+}
+
+func TestPythonSearchIntegration(t *testing.T) {
+	executable := pythonExecutable()
+	if _, err := exec.LookPath(executable); err != nil {
+		t.Skipf("Python unavailable: %v", err)
+	}
+	a := catalog(t)
+	a.Search = pythonSearch(executable)
+	missingCategory := hostQuery()
+	missingCategory.City, missingCategory.Category = "Астана", "Декоратор"
+	lowBudget := hostQuery()
+	budget := int64(1)
+	lowBudget.Budget = &budget
+	fractionalHours := hostQuery()
+	hours := 6.5
+	fractionalHours.Hours = &hours
+	for _, tc := range []struct {
+		name, status string
+		query        Query
+	}{
+		{"matches", "matches_found", hostQuery()},
+		{"no category", "category_unavailable", missingCategory},
+		{"no matches", "no_matches", lowBudget},
+		{"fractional hours", "matches_found", fractionalHours},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.query)
+			request := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			a.handler().ServeHTTP(response, request)
+			var result Result
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || response.Code != 200 || result.Status != tc.status {
+				t.Fatalf("Python response: HTTP %d %s, err=%v", response.Code, response.Body, err)
+			}
+			if tc.status == "matches_found" && len(result.Cards) == 0 {
+				t.Fatal("Python returned no cards")
+			}
+			if result.DateAlternatives == nil || result.NearbyAlternatives == nil {
+				t.Fatal("missing calendar suggestion arrays")
+			}
+			if tc.status != "matches_found" && len(result.NearbyAlternatives) == 0 {
+				t.Fatal("missing nearby alternatives for empty search")
+			}
+			for _, card := range result.Cards {
+				if card.Description == "" || len(card.Categories) == 0 || card.Explanation == "" || card.Origin != "organizer" {
+					t.Fatalf("incomplete UI card: %#v", card)
+				}
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.Search(ctx, hostQuery(), a.Profiles); !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker ignored cancellation: %v", err)
+	}
+}
+
+func TestServerAddressEnvironment(t *testing.T) {
+	for _, tc := range []struct{ port, listen, want string }{
+		{"", "", "127.0.0.1:8080"},
+		{"9090", "127.0.0.1:8080", ":9090"},
+		{":9090", "", ":9090"},
+		{"", "127.0.0.1:9091", "127.0.0.1:9091"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			t.Setenv("PORT", tc.port)
+			t.Setenv("LISTEN_ADDR", tc.listen)
+			if got := serverAddress(); got != tc.want {
+				t.Fatalf("address: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadEnvExample(t *testing.T) {
+	raw, err := os.ReadFile(".env.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"OPENAI_API_KEY", "PORT", "PYTHON_EXECUTABLE", "FRONTEND_ORIGIN", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT", "OPENAI_TRANSCRIPTION_MODEL"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PORT", "9099")
+	t.Chdir(t.TempDir())
+	// Windows editors may save an otherwise valid dotenv file with a UTF-8 BOM.
+	content := "\ufeff" + strings.TrimPrefix(string(raw), "\ufeff") + "\nOPENAI_TRANSCRIPTION_MODEL=test-transcription\n"
+	if err := os.WriteFile(".env", []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("DATABASE_URL") != localDatabaseURL || os.Getenv("POSTGRES_PORT") != "5432" || os.Getenv("OPENAI_TRANSCRIPTION_MODEL") != "test-transcription" {
+		t.Fatal("database or voice configuration was not loaded")
+	}
+	if os.Getenv("PORT") != "9099" {
+		t.Fatal("dotenv overwrote an existing environment variable")
+	}
+}
+
+func TestMiddlewareLoggingAndPartialPanic(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodOptions} {
+		t.Run(method, func(t *testing.T) {
+			var output bytes.Buffer
+			handler := withMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "999")
+				_, _ = w.Write([]byte("partial response"))
+				panic("private panic details")
+			}), log.New(&output, "", 0))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(method, "/api/search", nil))
+			want := 500
+			if method == http.MethodOptions {
+				want = 204
+			}
+			if response.Code != want {
+				t.Fatalf("got HTTP %d, want %d", response.Code, want)
+			}
+			if method == http.MethodGet && (!json.Valid(response.Body.Bytes()) || strings.Contains(response.Body.String(), "partial response") || response.Header().Get("Content-Length") != "") {
+				t.Fatalf("partial response leaked: %s", response.Body)
+			}
+			fields := strings.Fields(output.String())
+			if len(fields) != 4 || fields[0] != method || fields[1] != "/api/search" || fields[2] != fmt.Sprint(want) {
+				t.Fatalf("invalid access log: %s", output.String())
+			}
+			if _, err := time.ParseDuration(fields[3]); err != nil {
+				t.Fatalf("invalid latency: %v", err)
+			}
+		})
+	}
+}
+
+func TestRecoveryMiddleware(t *testing.T) {
+	handler := recoveryMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("test panic")
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("recovery status: got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "INTERNAL_ERROR") {
+		t.Fatalf("recovery body: %s", recorder.Body.String())
 	}
 }

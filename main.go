@@ -12,13 +12,16 @@ import (
 	"io"
 	"log"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -108,6 +111,7 @@ type App struct {
 	Version    string
 	Index      *SemanticIndex
 	AI         AIClient
+	Search     SearchFunc
 	DB         *pgxpool.Pool
 }
 
@@ -409,7 +413,8 @@ func apiError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, target any) bool {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
 		apiError(w, 415, "CONTENT_TYPE", "Ожидается JSON.")
 		return false
 	}
@@ -427,16 +432,117 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+// corsMiddleware handles preflight requests before they reach API handlers.
+func corsMiddleware(next http.Handler) http.Handler {
+	origin := envOr("FRONTEND_ORIGIN", "*")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func loggingMiddleware(logger *log.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		wrapped := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(wrapped, r)
+		status := wrapped.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		logger.Printf("%s %s %d %s", r.Method, r.URL.Path, status, time.Since(started))
+	})
+}
+
+// bufferedResponse keeps partial JSON private until the handler succeeds.
+type bufferedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (w *bufferedResponse) Header() http.Header { return w.header }
+
+func (w *bufferedResponse) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+}
+
+func (w *bufferedResponse) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(body)
+}
+
+// recoveryMiddleware can replace even a partially written response with JSON 500.
+// The API and static files use finite responses; streaming is intentionally absent.
+func recoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("panic serving %s %s: %v", r.Method, r.URL.Path, recovered)
+				apiError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Внутренняя ошибка сервера.")
+			}
+		}()
+		buffer := &bufferedResponse{header: w.Header().Clone()}
+		next.ServeHTTP(buffer, r)
+		for key, values := range buffer.header {
+			w.Header()[key] = values
+		}
+		if buffer.status == 0 {
+			buffer.status = http.StatusOK
+		}
+		w.WriteHeader(buffer.status)
+		_, _ = w.Write(buffer.body.Bytes())
+	})
+}
+
+func withMiddleware(next http.Handler, logger *log.Logger) http.Handler {
+	// Logging also covers preflight responses and recovered panics.
+	return loggingMiddleware(logger, corsMiddleware(recoveryMiddleware(next)))
+}
+
 func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		sendJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 	mux.HandleFunc("GET /api/options", func(w http.ResponseWriter, r *http.Request) {
 		current := a.requestCatalog(w, r)
 		if current == nil {
 			return
 		}
-		sendJSON(w, 200, map[string]any{"cities": current.Cities, "categories": current.Categories, "event_types": current.Formats, "languages": current.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(current.Profiles), "ai_enabled": a.AI.Key != "", "voice_enabled": a.AI.Key != "", "semantic_enabled": current.Index != nil, "data_version": current.Version})
+		sendJSON(w, 200, map[string]any{"cities": current.Cities, "categories": current.Categories, "event_types": current.Formats, "languages": current.Languages, "wishes": wishes, "first_date": firstDate, "last_date": lastDate, "profile_count": len(current.Profiles), "ai_enabled": current.AI.Key != "", "voice_enabled": current.AI.Key != "", "semantic_enabled": current.Index != nil, "python_search_enabled": current.Search != nil, "data_version": current.Version})
 	})
-	mux.HandleFunc("POST /api/matches", func(w http.ResponseWriter, r *http.Request) {
+	searchHandler := func(w http.ResponseWriter, r *http.Request) {
 		var q Query
 		if !decodeRequest(w, r, &q) {
 			return
@@ -450,7 +556,9 @@ func (a *App) handler() http.Handler {
 			return
 		}
 		sendJSON(w, 200, current.match(q))
-	})
+	}
+	mux.HandleFunc("POST /api/matches", searchHandler)
+	mux.HandleFunc("POST /api/search", a.handleSearch)
 	mux.HandleFunc("POST /api/briefs", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Text string `json:"text"`
@@ -484,19 +592,22 @@ func (a *App) handler() http.Handler {
 		}
 		files.ServeHTTP(w, r)
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
 		if r.Method == "POST" && r.Header.Get("Origin") != "" {
 			u, err := url.Parse(r.Header.Get("Origin"))
-			if err != nil || u.Host != r.Host {
+			localFrontend := err == nil && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1")
+			configuredFrontend := r.Header.Get("Origin") == os.Getenv("FRONTEND_ORIGIN")
+			if err != nil || (u.Host != r.Host && !localFrontend && !configuredFrontend) {
 				apiError(w, 403, "ORIGIN", "Запрос должен приходить из интерфейса приложения.")
 				return
 			}
 		}
 		mux.ServeHTTP(w, r)
 	})
+	return withMiddleware(base, log.Default())
 }
 
 func loadEnv() error {
@@ -507,7 +618,7 @@ func loadEnv() error {
 	if err != nil {
 		return err
 	}
-	for i, line := range strings.Split(string(raw), "\n") {
+	for i, line := range strings.Split(strings.TrimPrefix(string(raw), "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -515,7 +626,7 @@ func loadEnv() error {
 		key, value, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
-		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "LISTEN_ADDR", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT"}, key) {
+		if !ok || !slices.Contains([]string{"OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_EMBEDDING_MODEL", "OPENAI_TRANSCRIPTION_MODEL", "DATABASE_URL", "POSTGRES_PASSWORD", "POSTGRES_PORT", "LISTEN_ADDR", "PORT", "PYTHON_EXECUTABLE", "FRONTEND_ORIGIN"}, key) {
 			return fmt.Errorf(".env: неизвестная настройка в строке %d", i+1)
 		}
 		if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
@@ -535,6 +646,40 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func serverAddress() string {
+	if port := os.Getenv("PORT"); port != "" {
+		if strings.HasPrefix(port, ":") {
+			return port
+		}
+		return ":" + port
+	}
+	return envOr("LISTEN_ADDR", "127.0.0.1:8080")
+}
+
+// runServer returns startup failures immediately and drains requests on shutdown.
+func runServer(server *http.Server, stop <-chan os.Signal) error {
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+	select {
+	case err := <-serverErrors:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("HTTP server: %w", err)
+	case <-stop:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		// Cancel active requests (including Python subprocesses) after the deadline.
+		_ = server.Close()
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -569,8 +714,15 @@ func main() {
 	if err := a.loadIndex("data/semantic-index.json"); err != nil {
 		log.Printf("Смысловой индекс недоступен: %v. Используется порядок по цене.", err)
 	}
-	addr := envOr("LISTEN_ADDR", "127.0.0.1:8080")
+	// Configure the backend before building handlers or accepting requests.
+	a.Search = pythonSearch(pythonExecutable())
+	addr := serverAddress()
 	log.Printf("EventMatch: http://%s · %d профилей · AI=%t · смысловой индекс=%t", addr, len(a.Profiles), a.AI.Key != "", a.Index != nil)
 	server := &http.Server{Addr: addr, Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 60 * time.Second}
-	log.Fatal(server.ListenAndServe())
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(stop)
+	if err := runServer(server, stop); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -38,7 +38,6 @@ function capture() {
 function sidebar(route) {
   const active = STEPS.findIndex(s => s[0] === route);
   document.getElementById('step-nav').innerHTML = STEPS.map(([key,name,sub], i) => `<button type="button" data-go="${key}" class="step-button ${i === active ? 'active' : ''}" ${busy ? 'disabled' : ''} ${i === active ? 'aria-current="step"' : ''}><span class="number">${i+1}</span><span><strong>${name}</strong><small>${sub}</small></span></button>`).join('');
-
 }
 function dateChange(query, result) {
   if (!previousSearch || previousSearch.query.event_date === query.event_date || previousSearch.result.data_version !== result.data_version) return '';
@@ -62,7 +61,7 @@ async function runSearch() {
   const query = structuredClone(state);
   busy = true; error = ''; render();
   try {
-    const result = await api('/api/matches',query);
+    const result = await api('/api/search',query);
     result.date_change = dateChange(query,result);
     activeResults = result;
     previousSearch = {query,result};

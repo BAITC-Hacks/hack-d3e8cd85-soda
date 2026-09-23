@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,7 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestPostgreSQL(t *testing.T) {
+func disposableDatabase(t *testing.T) (*pgxpool.Pool, string) {
+	t.Helper()
 	address := os.Getenv("TEST_DATABASE_URL")
 	if address == "" {
 		t.Skip("set TEST_DATABASE_URL to run against PostgreSQL; requires CREATE DATABASE")
@@ -25,18 +29,20 @@ func TestPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close()
+	t.Cleanup(admin.Close)
 	// Own disposable database: never clear the application's schema or catalog.
 	name := fmt.Sprintf("eventmatch_check_%d", time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
 	if _, err = admin.Exec(ctx, "CREATE DATABASE "+identifier); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if _, err := admin.Exec(context.Background(), "DROP DATABASE "+identifier); err != nil {
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := admin.Exec(ctx, "DROP DATABASE "+identifier); err != nil {
 			t.Error(err)
 		}
-	}()
+	})
 	config, err := pgxpool.ParseConfig(address)
 	if err != nil {
 		t.Fatal("invalid TEST_DATABASE_URL")
@@ -46,7 +52,27 @@ func TestPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal("cannot open disposable database")
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
+	databaseURL := address + " dbname=" + name
+	if strings.HasPrefix(address, "postgres://") || strings.HasPrefix(address, "postgresql://") {
+		u, err := url.Parse(address)
+		if err != nil {
+			t.Fatal("invalid TEST_DATABASE_URL")
+		}
+		u.Path = "/" + name
+		query := u.Query()
+		query.Del("dbname")
+		u.RawQuery = query.Encode()
+		databaseURL = u.String()
+	}
+	return pool, databaseURL
+}
+
+func TestPostgreSQL(t *testing.T) {
+	pool, _ := disposableDatabase(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var err error
 	if err = initDatabase(ctx, pool, "missing.csv", "missing.json"); err == nil {
 		t.Fatal("bad import succeeded")
 	}
@@ -104,6 +130,29 @@ func TestPostgreSQL(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(after, snapshot.match(q)) {
 		t.Fatal("restart overwrote edited calendar", err)
 	}
+	// Both public search endpoints must read committed edits, not the startup catalog.
+	t.Run("fresh search snapshot", func(t *testing.T) {
+		python := pythonExecutable()
+		if _, err := exec.LookPath(python); err != nil {
+			t.Skipf("Python unavailable: %v", err)
+		}
+		app := seed
+		app.DB, app.Search = pool, pythonSearch(python)
+		body, _ := json.Marshal(q)
+		for _, path := range []string{"/api/matches", "/api/search"} {
+			r := httptest.NewRecorder()
+			request := httptest.NewRequest("POST", path, strings.NewReader(string(body)))
+			request.Header.Set("Content-Type", "application/json")
+			app.handler().ServeHTTP(r, request)
+			var result Result
+			if err := json.Unmarshal(r.Body.Bytes(), &result); err != nil || r.Code != 200 || result.Total != before.Total-1 || strings.Contains(strings.Join(ids(result), ","), before.Cards[0].ID) {
+				t.Fatalf("%s returned stale catalog: HTTP %d %s", path, r.Code, r.Body)
+			}
+			if len(result.DateAlternatives) == 0 || result.DateAlternatives[0].ID != before.Cards[0].ID {
+				t.Fatalf("%s lost date alternatives", path)
+			}
+		}
+	})
 	for _, statement := range []string{
 		"UPDATE eventmatch.contractors SET evidence='invented fact' WHERE id='HK-88430'",
 		"UPDATE eventmatch.contractors SET price_from_kzt=-1 WHERE id='HK-88430'",

@@ -2,3 +2,5 @@
 .env.*
 !.env.example
 /eventmatch
+__pycache__/
+*.py[cod]
