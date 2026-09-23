@@ -5,10 +5,9 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const money = n => new Intl.NumberFormat('ru-RU').format(n) + ' ₸';
 const dateLabel = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? new Intl.DateTimeFormat('ru-RU', {timeZone:'UTC'}).format(new Date(d + 'T12:00:00Z')) : 'Не указана';
 const main = document.getElementById('main');
-const STEPS = [['event','Событие','Город, дата и формат'], ['category','Подрядчик','Кто вам нужен'], ['preferences','Условия','Бюджет и пожелания'], ['review','Проверка','Проверьте перед подбором']];
+const STEPS = [['event','Событие','Город, дата и формат'], ['preferences','Условия','Бюджет и пожелания'], ['review','Проверка','Проверьте перед подбором']];
 const blankQuery = () => ({city:'', event_date:'', event_type:'', category:'', budget_kzt:null, duration_hours:null, language:'', wishes:[], unverified_requirements:[]});
-let state = blankQuery(), options = null, activeResults = null, previousSearch = null, busy = false, rawBrief = '', error = '';
-const categoryIcons = {'Ведущий':'mic','Фотограф':'camera','Видеограф':'camera','Флорист':'flower','Декоратор':'sparkles','Банкетный зал':'building','Ресторан':'building','Отель':'bed','Загородная площадка':'building','Подарки и сувениры':'gift','Ведущий церемонии':'heart','Фото и видеобудки':'image','Инструменталист':'music','Лайв-бэнд':'music','Национальный ансамбль':'music','Танцевальный коллектив':'sparkles','Шоу-программа':'sparkles'};
+let state = blankQuery(), options = null, activeResults = null, previousSearch = null, busy = false, rawBrief = '', error = '', reviewRequirements = [];
 const button = (text, route, primary = false, ico = 'arrow') => `<button type="button" class="btn ${primary ? 'btn-primary' : ''}" data-go="${esc(route)}">${icon(ico)}${esc(text)}</button>`;
 const header = (kicker, title, subtitle) => `<div class="eyebrow">${esc(kicker)}</div><h1>${title}</h1><p class="intro">${esc(subtitle)}</p>`;
 const selectOptions = (values, selected, placeholder = 'Выберите') => `<option value="">${esc(placeholder)}</option>` + values.map(v => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(v)}</option>`).join('');
@@ -26,11 +25,14 @@ function capture() {
   if (!form) return;
   const before = JSON.stringify(state), data = new FormData(form);
   for (const [k,v] of data.entries()) {
-    if (k === 'wish') continue;
-    if (k === 'unverified_requirements') state[k] = String(v).split('\n').map(s => s.trim()).filter(Boolean);
-    else state[k] = ['budget_kzt','duration_hours'].includes(k) ? (v === '' ? null : Number(v)) : v;
+    if (k === 'wish' || k === 'ignored_requirement') continue;
+    state[k] = ['budget_kzt','duration_hours'].includes(k) ? (v === '' ? null : Number(v)) : v;
   }
   if (form.querySelector('[data-wishes]')) state.wishes = data.getAll('wish').sort();
+  if (form.querySelector('#requirements-review')) {
+    const ignored = new Set(data.getAll('ignored_requirement'));
+    state.unverified_requirements = reviewRequirements.filter((_,i) => !ignored.has(String(i)));
+  }
   if (JSON.stringify(state) !== before) activeResults = null;
 }
 function sidebar(route) {
@@ -105,7 +107,15 @@ function dateChange(query, result) {
 async function runSearch() {
   if (busy) return;
   capture();
-  if (state.unverified_requirements.length) { error = 'Остались непроверяемые требования. Уточните их или явно уберите перед подбором.'; render(); return; }
+  if (state.unverified_requirements.length) {
+    const box = document.getElementById('requirements-review');
+    box.classList.add('needs-attention');
+    document.getElementById('requirements-status').textContent = 'Для каждого пункта ниже уточните описание или явно согласитесь продолжить без его проверки.';
+    box.scrollIntoView({block:'start',behavior:'instant'});
+    box.querySelector('input:not(:checked)')?.focus({preventScroll:true});
+    announce('Подбор ещё не запущен. Нужно решить, как учитывать перечисленные условия.');
+    return;
+  }
   const query = structuredClone(state);
   busy = true; error = ''; render();
   try {
@@ -121,7 +131,9 @@ async function runSearch() {
 function requestError(e) { return ['TimeoutError','AbortError'].includes(e.name) ? 'Сервис не ответил вовремя. Условия сохранены, попробуйте ещё раз.' : e.message; }
 function render() {
   if (!options) return;
-  let route = location.hash.slice(1) || 'brief';
+  cancelDictation();
+  let route = location.hash.slice(1) || 'home';
+  document.body.dataset.page = route.split('/')[0];
   if (['results','no-category','no-matches'].includes(route) || route.startsWith('profile/')) {
     if (!activeResults) { navigate('review'); return; }
     if (!route.startsWith('profile/')) {
@@ -130,56 +142,56 @@ function render() {
     }
   }
   sidebar(route);
-  if (busy) { main.setAttribute('aria-busy','true'); main.innerHTML = '<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Проверяем запрос…</div>'; return; }
-  main.removeAttribute('aria-busy');
-  const screens = {brief:briefPage,event:eventPage,category:categoryPage,preferences:preferencesPage,review:reviewPage,results:resultsPage,'no-category':emptyPage,'no-matches':emptyPage};
+  if (busy && route !== 'brief') { main.setAttribute('aria-busy','true'); main.innerHTML = '<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Проверяем запрос…</div>'; return; }
+  main.setAttribute('aria-busy',String(busy));
+  const screens = {home:homePage,brief:briefPage,event:eventPage,preferences:preferencesPage,review:reviewPage,results:resultsPage,'no-category':emptyPage,'no-matches':emptyPage};
   if (route.startsWith('profile/')) main.innerHTML = profilePage(route.split('/')[1]);
   else if (screens[route]) main.innerHTML = screens[route]();
-  else { navigate('brief'); return; }
+  else { navigate('home'); return; }
+  loadCalendar();
+  animatePage();
   if (error) { main.insertAdjacentHTML('afterbegin',`<p class="error request-error" role="alert" tabindex="-1">${esc(error)}</p>`); main.querySelector('.request-error').focus(); }
   else main.focus({preventScroll:true});
-  document.title = (route === 'brief' ? 'AI-подбор подрядчиков' : STEPS.find(s => s[0] === route)?.[1] || 'Подбор подрядчиков') + ' · EventMatch';
+  document.title = (route === 'home' ? 'Ваше событие начинается здесь' : route === 'brief' ? 'AI-подбор подрядчиков' : STEPS.find(s => s[0] === route)?.[1] || 'Подбор подрядчиков') + ' · EventMatch';
   window.scrollTo({top:0,behavior:'instant'});
 }
 document.addEventListener('input',e => { if (e.target.id === 'brief') rawBrief = e.target.value; });
+document.addEventListener('change',e => {
+  if (e.target.name !== 'ignored_requirement') return;
+  capture();
+  document.getElementById('requirements-review').classList.remove('needs-attention');
+  document.getElementById('requirements-status').textContent = state.unverified_requirements.length ? 'Осталось уточнить: '+state.unverified_requirements.length+'.' : 'Эти условия не будут проверяться. Теперь подтвердите остальные параметры ниже.';
+});
 document.addEventListener('click',e => {
   if (e.target.closest('.skip-link')) { e.preventDefault(); main.focus(); return; }
   if (busy) { if (e.target.closest('a,button')) e.preventDefault(); return; }
   const sample = e.target.closest('[data-example]');
   if (sample) {
-    rawBrief = ''; error = ''; activeResults = null;
+    resetConversation(); rawBrief = ''; error = ''; activeResults = null; reviewRequirements = [];
     state = sample.dataset.example === 'hosts' ? {...blankQuery(),city:'Алматы',event_date:'2026-10-06',event_type:'корпоратив',category:'Ведущий',budget_kzt:1300000,duration_hours:6,language:'русский'} : {...blankQuery(),city:'Астана',event_date:sample.dataset.example === 'rare' ? '2026-10-01' : '2026-10-02',event_type:'свадьба',category:'Флорист',budget_kzt:300000,language:'русский'};
     navigate('review'); return;
   }
-  const category = e.target.closest('[data-category]');
-  if (category) { state.category = category.dataset.category; activeResults = null; render(); main.querySelector(`[data-category="${CSS.escape(state.category)}"]`).focus(); return; }
+  const occasion = e.target.closest('[data-occasion]');
+  if (occasion) { capture(); state.event_type = occasion.dataset.occasion; activeResults = null; navigate('event'); return; }
+  const alternative = e.target.closest('[data-alternative-date]');
+  if (alternative) { state.event_date = alternative.dataset.alternativeDate; activeResults = null; calendarMonth = state.event_date.slice(0,7); navigate('review'); announce('Выбрана новая дата. Проверьте остальные условия и подтвердите подбор.'); return; }
+  const nearby = e.target.closest('[data-nearby-review]');
+  if (nearby) { navigate('review'); announce('Исходные условия сохранены. Измените только те параметры, которые готовы пересмотреть, и подтвердите поиск.'); return; }
   const go = e.target.closest('[data-go]');
   if (go && !go.disabled) { capture(); error = ''; navigate(go.dataset.go); }
 });
-document.addEventListener('keydown',e => {
-  const el = e.target.closest('[data-category]');
-  if (!el || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) return;
-  e.preventDefault(); const buttons = [...main.querySelectorAll('[data-category]')];
-  const i = buttons.indexOf(el), next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length-1 : (i + (['ArrowLeft','ArrowUp'].includes(e.key) ? -1 : 1) + buttons.length) % buttons.length;
-  buttons[next].click();
-});
 document.addEventListener('submit',async e => {
-  e.preventDefault(); if (busy || !e.target.reportValidity()) return;
+  e.preventDefault(); if (busy || dictation || !e.target.reportValidity()) return;
   error = '';
   if (e.target.id === 'brief-form') {
-    rawBrief = new FormData(e.target).get('text'); busy = true; render();
-    try {
-      const q = await api('/api/briefs',{text:rawBrief});
-      state = {...blankQuery(),...q,city:q.city || '',category:q.category || '',event_type:q.event_type || '',event_date:q.event_date || '',language:q.language || '',wishes:q.wishes || [],unverified_requirements:q.unverified_requirements || []};
-      activeResults = null; busy = false; navigate('review');
-    } catch (err) { busy = false; error = requestError(err); render(); }
+    await sendConsultation(new FormData(e.target).get('text'));
   } else if (e.target.id === 'review-form') await runSearch();
-  else { capture(); navigate(e.target.id === 'event-form' ? 'category' : 'review'); }
+  else { capture(); navigate(e.target.id === 'event-form' ? 'preferences' : 'review'); }
 });
 window.addEventListener('hashchange',() => { capture(); error = ''; render(); });
 async function start() {
   main.innerHTML = '<div class="loading-state" role="status">Загружаем каталог…</div>';
-  try { options = await api('/api/options'); document.getElementById('catalog-count').textContent = options.profile_count + ' профилей'; render(); }
+  try { options = await api('/api/options'); render(); }
   catch { main.innerHTML = '<div class="form-card"><h1>Сервис недоступен</h1><p>Не удалось загрузить каталог. Откройте приложение через запущенный сервер и повторите попытку.</p><button class="btn btn-primary" id="retry-start">Повторить</button></div>'; document.getElementById('retry-start').onclick = start; }
 }
 start();
