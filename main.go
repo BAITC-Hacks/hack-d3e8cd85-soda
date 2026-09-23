@@ -86,15 +86,16 @@ type Card struct {
 }
 
 type Result struct {
-	Status         string         `json:"status"`
-	Cards          []Card         `json:"cards"`
-	Total          int            `json:"total"`
-	CandidateCount int            `json:"candidate_count"`
-	Excluded       map[string]int `json:"excluded"`
-	Message        string         `json:"message"`
-	Ranking        string         `json:"ranking"`
-	Notice         string         `json:"notice"`
-	Version        string         `json:"data_version"`
+	Status           string            `json:"status"`
+	Cards            []Card            `json:"cards"`
+	Total            int               `json:"total"`
+	CandidateCount   int               `json:"candidate_count"`
+	Excluded         map[string]int    `json:"excluded"`
+	Message          string            `json:"message"`
+	Ranking          string            `json:"ranking"`
+	Notice           string            `json:"notice"`
+	Version          string            `json:"data_version"`
+	DateAlternatives []DateAlternative `json:"date_alternatives"`
 }
 
 type App struct {
@@ -297,7 +298,8 @@ var exclusionLabels = []struct{ key, label string }{
 }
 
 func (a *App) match(q Query) Result {
-	r := Result{Status: "matches_found", Cards: []Card{}, Excluded: map[string]int{}, Ranking: "price", Version: a.Version}
+	r := Result{Status: "matches_found", Cards: []Card{}, Excluded: map[string]int{}, Ranking: "price", Version: a.Version, DateAlternatives: []DateAlternative{}}
+	var busyCandidates []Card
 	ids := append([]string{}, q.Wishes...)
 	sort.Strings(ids)
 	ids = slices.Compact(ids)
@@ -319,22 +321,24 @@ func (a *App) match(q Query) Result {
 		}
 		r.CandidateCount++
 		failed := false
-		for key, fail := range map[string]bool{
-			"booked": slices.Contains(p.Busy, q.Date), "budget": p.Price > *q.Budget,
-			"format": !slices.Contains(p.Formats, q.Format), "language": q.Language != "" && !slices.Contains(p.Languages, q.Language),
-			"duration": q.Hours != nil && p.Hours != nil && *p.Hours < *q.Hours,
-		} {
+		failures := profileFailures(p, q)
+		for key, fail := range failures {
 			if fail {
 				r.Excluded[key]++
 				failed = true
 			}
 		}
-		if failed {
-			continue
-		}
 		c := Card{Profile: p, Category: q.Category}
 		if r.Ranking == "semantic" {
 			c.score = a.Index.score(p.ID, ids)
+		}
+		if failed {
+			other := q
+			other.Date = ""
+			if failures["booked"] && passesProfile(p, other) {
+				busyCandidates = append(busyCandidates, c)
+			}
+			continue
 		}
 		fit := fmt.Sprintf("Формат «%s» указан, на %s занятость не отмечена; цена от %s ₸ укладывается в бюджет", q.Format, q.Date, money(p.Price))
 		if q.Language != "" {
@@ -350,16 +354,11 @@ func (a *App) match(q Query) Result {
 		c.Explanation = "В описании: «" + strings.TrimRight(p.Evidence, ".!? ") + "». " + fit + "."
 		r.Cards = append(r.Cards, c)
 	}
-	sort.Slice(r.Cards, func(i, j int) bool {
-		x, y := r.Cards[i], r.Cards[j]
-		if x.score != y.score {
-			return x.score > y.score
-		}
-		if x.Price != y.Price {
-			return x.Price < y.Price
-		}
-		return x.ID < y.ID
-	})
+	sortCards(r.Cards)
+	sortCards(busyCandidates)
+	for _, c := range busyCandidates[:min(3, len(busyCandidates))] {
+		r.DateAlternatives = append(r.DateAlternatives, DateAlternative{Profile: c.Profile, Dates: nearestDates(c.Profile, q.Date)})
+	}
 	r.Total = len(r.Cards)
 	if len(r.Cards) > 3 {
 		r.Cards = r.Cards[:3]
@@ -370,9 +369,9 @@ func (a *App) match(q Query) Result {
 		r.Message = fmt.Sprintf("В каталоге для города %s нет категории «%s».", q.City, q.Category)
 	case r.Total == 0:
 		r.Status = "no_matches"
-		r.Message = fmt.Sprintf("В городе есть %d профилей этой категории, но никто не проходит все условия.", r.CandidateCount)
+		r.Message = fmt.Sprintf("Кандидатов в этой категории и городе: %d. Никто не проходит все условия.", r.CandidateCount)
 	default:
-		r.Message = fmt.Sprintf("Подходят %d из %d профилей этой категории в городе; показываем %d.", r.Total, r.CandidateCount, len(r.Cards))
+		r.Message = fmt.Sprintf("Совпадений: %d из %d профилей этой категории в городе; показываем %d.", r.Total, r.CandidateCount, len(r.Cards))
 	}
 	if r.Total < 3 && r.CandidateCount > r.Total {
 		var reasons []string
@@ -471,9 +470,10 @@ func (a *App) handler() http.Handler {
 		sendJSON(w, 200, q)
 	})
 	mux.HandleFunc("POST /api/transcriptions", a.transcriptionHandler)
+	mux.HandleFunc("POST /api/calendar", a.calendarHandler)
 	files := http.FileServer(http.Dir("Soda_UI/EventMatch/dist"))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if !slices.Contains([]string{"/", "/index.html", "/styles.css", "/app.js", "/voice.js"}, r.URL.Path) {
+		if !slices.Contains([]string{"/", "/index.html", "/styles.css", "/app.js", "/voice.js", "/pages.js", "/calendar.js"}, r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
