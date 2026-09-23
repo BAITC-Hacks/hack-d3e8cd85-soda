@@ -85,13 +85,14 @@ function render() {
     }
   }
   sidebar(route);
-  if (busy) { main.setAttribute('aria-busy','true'); main.innerHTML = '<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Проверяем запрос…</div>'; return; }
-  main.removeAttribute('aria-busy');
+  if (busy && route !== 'brief') { main.setAttribute('aria-busy','true'); main.innerHTML = '<div class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>Проверяем запрос…</div>'; return; }
+  main.setAttribute('aria-busy',String(busy));
   const screens = {home:homePage,brief:briefPage,event:eventPage,preferences:preferencesPage,review:reviewPage,results:resultsPage,'no-category':emptyPage,'no-matches':emptyPage};
   if (route.startsWith('profile/')) main.innerHTML = profilePage(route.split('/')[1]);
   else if (screens[route]) main.innerHTML = screens[route]();
   else { navigate('home'); return; }
   loadCalendar();
+  animatePage();
   if (error) { main.insertAdjacentHTML('afterbegin',`<p class="error request-error" role="alert" tabindex="-1">${esc(error)}</p>`); main.querySelector('.request-error').focus(); }
   else main.focus({preventScroll:true});
   document.title = (route === 'home' ? 'Ваше событие начинается здесь' : route === 'brief' ? 'AI-подбор подрядчиков' : STEPS.find(s => s[0] === route)?.[1] || 'Подбор подрядчиков') + ' · EventMatch';
@@ -109,7 +110,7 @@ document.addEventListener('click',e => {
   if (busy) { if (e.target.closest('a,button')) e.preventDefault(); return; }
   const sample = e.target.closest('[data-example]');
   if (sample) {
-    rawBrief = ''; error = ''; activeResults = null; reviewRequirements = [];
+    resetConversation(); rawBrief = ''; error = ''; activeResults = null; reviewRequirements = [];
     state = sample.dataset.example === 'hosts' ? {...blankQuery(),city:'Алматы',event_date:'2026-10-06',event_type:'корпоратив',category:'Ведущий',budget_kzt:1300000,duration_hours:6,language:'русский'} : {...blankQuery(),city:'Астана',event_date:sample.dataset.example === 'rare' ? '2026-10-01' : '2026-10-02',event_type:'свадьба',category:'Флорист',budget_kzt:300000,language:'русский'};
     navigate('review'); return;
   }
@@ -126,14 +127,7 @@ document.addEventListener('submit',async e => {
   e.preventDefault(); if (busy || dictation || !e.target.reportValidity()) return;
   error = '';
   if (e.target.id === 'brief-form') {
-    rawBrief = new FormData(e.target).get('text'); busy = true; render();
-    try {
-      const q = await api('/api/briefs',{text:rawBrief});
-      state = {...blankQuery(),...q,city:q.city || '',category:q.category || '',event_type:q.event_type || '',event_date:q.event_date || '',language:q.language || '',wishes:q.wishes || [],unverified_requirements:q.unverified_requirements || []};
-      reviewRequirements = [...new Set(state.unverified_requirements)];
-      state.unverified_requirements = [...reviewRequirements];
-      activeResults = null; busy = false; navigate('review');
-    } catch (err) { busy = false; error = requestError(err); render(); }
+    await sendConsultation(new FormData(e.target).get('text'));
   } else if (e.target.id === 'review-form') await runSearch();
   else { capture(); navigate(e.target.id === 'event-form' ? 'preferences' : 'review'); }
 });

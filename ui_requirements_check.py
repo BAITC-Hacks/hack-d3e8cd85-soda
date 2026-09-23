@@ -30,10 +30,10 @@ class Proxy(BaseHTTPRequestHandler):
         status, kind = 200, 'application/json'
         if self.path == '/frame':
             data, kind = b'<iframe title="Mobile check" src="/#brief" style="width:320px;height:1100px;border:0"></iframe>', 'text/html'
-        elif self.path == '/api/briefs':
-            data = json.dumps(dict(city='Алматы', category='Ведущий', event_type='корпоратив',
+        elif self.path == '/api/consultations':
+            data = json.dumps(dict(query=dict(city='Алматы', category='Ведущий', event_type='корпоратив',
                 event_date='2026-10-06', budget_kzt=1300000, duration_hours=6, language='русский',
-                wishes=[], unverified_requirements=requirements)).encode()
+                wishes=[], unverified_requirements=requirements),focus='review',question='',choices=[])).encode()
         else:
             if self.path == '/api/matches':
                 searches.append(json.loads(payload))
@@ -74,6 +74,8 @@ try:
         wait.until(lambda d: d.find_elements(By.ID, 'brief'))
         element('#brief').send_keys('Корпоратив в Алматы, ведущий без конкурсов.')
         click('#brief-form button[type=submit]')
+        wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, '.conversation-ready'))
+        click('.conversation-ready [data-go=review]')
         route('review')
         assert requirements[0] in element('#requirements-review').text
         assert browser.execute_script('return document.querySelector("#requirements-review").offsetTop < document.querySelector(".summary-grid").offsetTop')
@@ -104,8 +106,11 @@ try:
         assert len(browser.find_elements(By.CSS_SELECTOR, '.contractor-card')) == 3
         click('.header-start')
         route('brief')
-        assert element('#brief').get_attribute('value') == 'Корпоратив в Алматы, ведущий без конкурсов.'
+        assert 'Корпоратив в Алматы, ведущий без конкурсов.' in element('.conversation-log').text
+        element('#brief').send_keys('Повтори разбор.')
         click('#brief-form button[type=submit]')
+        wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, '.conversation-ready'))
+        click('.conversation-ready [data-go=review]')
         route('review')
         assert not any(e.is_selected() for e in browser.find_elements(By.NAME, 'ignored_requirement')), 'old consent reused after new AI parsing'
         click('#requirements-review [data-go=brief]')
@@ -118,6 +123,8 @@ try:
         wait.until(lambda d: d.find_elements(By.ID, 'brief'))
         element('#brief').send_keys('Корпоратив, ведущий без конкурсов.')
         click('#brief-form button[type=submit]')
+        wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, '.conversation-ready'))
+        click('.conversation-ready [data-go=review]')
         route('review')
         assert browser.execute_script('return innerWidth === 320 && document.documentElement.scrollWidth <= 320')
         click('#review-form button[type=submit]')

@@ -474,10 +474,11 @@ func (a *App) handler() http.Handler {
 		sendJSON(w, 200, q)
 	})
 	mux.HandleFunc("POST /api/transcriptions", a.transcriptionHandler)
+	mux.HandleFunc("POST /api/consultations", a.consultationHandler)
 	mux.HandleFunc("POST /api/calendar", a.calendarHandler)
 	files := http.FileServer(http.Dir("Soda_UI/EventMatch/dist"))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if !slices.Contains([]string{"/", "/index.html", "/styles.css", "/app.js", "/voice.js", "/pages.js", "/calendar.js"}, r.URL.Path) {
+		if !slices.Contains([]string{"/", "/index.html", "/styles.css", "/app.js", "/voice.js", "/pages.js", "/calendar.js", "/consultant.js", "/motion.js"}, r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}

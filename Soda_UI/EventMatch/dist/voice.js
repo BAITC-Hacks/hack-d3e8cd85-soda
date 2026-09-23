@@ -4,7 +4,7 @@ let dictation = null;
 const voiceSupported = () => window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
 
 function voiceControls() {
-  const available = options.voice_enabled && voiceSupported();
+  const available = options.voice_enabled && voiceSupported() && !busy;
   return `<div class="voice-controls"><div class="actions"><button type="button" class="btn" id="voice-toggle" ${available ? '' : 'disabled'}>${icon('mic')}Диктовать</button><button type="button" class="btn" id="voice-cancel" hidden>Отменить запись</button></div><p id="voice-status" class="hint" role="status" aria-live="polite">${!voiceSupported() ? 'Диктовка недоступна в этом браузере или соединении. Используйте localhost или HTTPS; текст можно ввести вручную.' : !options.voice_enabled ? 'Голосовой ввод пока недоступен. Пожелания можно напечатать.' : 'До 60 секунд. После остановки запись отправится в OpenAI, а текст появится здесь для вашей правки.'}</p></div>`;
 }
 
@@ -109,7 +109,7 @@ async function finishDictation(session,mimeType) {
     rawBrief = combined;
     document.getElementById('brief').value = rawBrief;
     dictation = null;
-    paintVoice('Готово. Проверьте текст и нажмите «Понять запрос», когда всё верно.');
+    paintVoice('Готово. Проверьте текст и нажмите «Отправить», когда всё верно.');
     document.getElementById('brief').focus();
   } catch (e) {
     if (dictation !== session) return;
