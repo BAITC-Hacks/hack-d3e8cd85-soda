@@ -1,0 +1,4 @@
+﻿# Optional semantic backend
+sentence-transformers>=3.0.0
+# Optional EDA
+pandas>=2.0.0
